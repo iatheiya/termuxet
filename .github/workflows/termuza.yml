@@ -83,6 +83,7 @@ jobs:
             diagnostics-*.txt
             app/build/reports/
             app/build/test-results/
+          if-no-files-found: warn
 
   build:
     name: build
@@ -162,7 +163,7 @@ jobs:
             cat "$NATIVE_OUT" | sed -n '1,200p' >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt" || true
             echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
             echo "[CONTEXT]" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
-            echo "Detected native libraries inside APK. If your app loads native libraries at startup, ABI mismatch or missing libraries can cause instant process termination before any UI frame is drawn." >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "Detected native libraries inside APK. If your app loads native libraries at startup, ABI mismatch or missing libraries can cause instant termination before any UI frame is drawn." >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
           else
             echo "[WHERE] build native check" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
             echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
@@ -203,6 +204,7 @@ jobs:
             ERRORS_build_manifest_*.txt
             app/build/outputs/apk/**/*.apk
             app/build/outputs/mapping/**/mapping.txt
+          if-no-files-found: warn
 
   emulator-launch:
     name: emulator-launch-check
@@ -237,11 +239,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
-          path: artifacts/build || true
+          path: downloaded_build
+      - name: list-downloaded
+        run: |
+          echo "Listing downloaded_build content"
+          ls -la downloaded_build || true
+          find downloaded_build -maxdepth 3 -type f -name "*.apk" -print || true
       - name: find-apk-in-artifact
         id: find_apk
         run: |
-          APK="$(find artifacts/build -type f -name "*.apk" | head -n 1 || true)"
+          APK="$(find downloaded_build -type f -name "*.apk" | head -n 1 || true)"
           if [ -n "$APK" ]; then
             echo "apk_path=$APK" >> $GITHUB_OUTPUT
           fi
@@ -287,7 +294,7 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="$GITHUB_WORKSPACE/ERRORS_emulator_${RUNID}.txt"
           echo "=== ERRORS emulator run $RUNID ===" > "$OUT"
-          for f in emulator-${RUNID}-*.txt artifacts/build/*; do
+          for f in emulator-${RUNID}-*.txt downloaded_build/*; do
             if [ -f "$f" ]; then
               echo "" >> "$OUT"
               echo "----- FILE: $f -----" >> "$OUT"
@@ -310,7 +317,8 @@ jobs:
           path: |
             emulator-*.txt
             ERRORS_emulator_*.txt
-            artifacts/build/**
+            downloaded_build/**
+          if-no-files-found: warn
 
   collect:
     name: collect-summary
@@ -324,17 +332,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: diagnostics-artifacts
-          path: artifacts/diagnostics || true
+          path: artifacts/diagnostics
       - name: download-build
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
-          path: artifacts/build || true
+          path: artifacts/build
       - name: download-emulator
         uses: actions/download-artifact@v4
         with:
           name: emulator-artifacts
-          path: artifacts/emulator || true
+          path: artifacts/emulator
       - name: make-errors-summary
         run: |
           RUNID=${{ github.run_id }}
@@ -395,3 +403,4 @@ jobs:
         with:
           name: errors-summary
           path: ERRORS_SUMMARY_*.txt
+          if-no-files-found: warn
