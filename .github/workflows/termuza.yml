@@ -10,12 +10,15 @@ on:
 env:
   BUILD_TOOLS_VERSION: '34.0.0'
   JAVA_VERSION: '17'
+  AVD_NAME: 'ci_avd'
+  EMU_BOOT_TIMEOUT_SEC: '240'
+  EMU_WAIT_FOR_DEVICE_SEC: '180'
 
 jobs:
   diagnostics:
     name: diagnostics
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -92,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: diagnostics
     if: always()
-    timeout-minutes: 75
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -115,7 +118,7 @@ jobs:
       - name: install-sdk-components
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}" || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}" "emulator" "system-images;android-34;google_apis;x86_64" || true
       - run: chmod +x ./gradlew
       - name: prepare-keystore
         id: keystore
@@ -221,31 +224,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: always()
-    timeout-minutes: 70
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-      - uses: android-actions/setup-android@v3
+      - uses: actions/setup-node@v4
         with:
-          cmdline-tools-version: 11076708
-      - name: ensure-ANDROID_HOME
-        run: |
-          if [ -d "$HOME/Android/Sdk" ]; then
-            echo "ANDROID_HOME=$HOME/Android/Sdk" >> $GITHUB_ENV
-          elif [ -n "$ANDROID_SDK_ROOT" ]; then
-            echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          else
-            echo "ANDROID_HOME=$HOME/.android/sdk" >> $GITHUB_ENV
-          fi
-      - name: install-system-image
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}" "system-images;android-34;google_apis;x86_64" || true
-      - name: download-build-artifact
-        uses: actions/download-artifact@v4
+          node-version: '18'
+      - uses: actions/download-artifact@v4
         with:
           name: build-artifacts
           path: downloaded_build
@@ -263,89 +252,123 @@ jobs:
           else
             echo "apk_exists=false" >> $GITHUB_ENV
           fi
+      - name: prepare-sdk-tools
+        if: env.apk_exists == 'true'
+        run: |
+          export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          echo "sdk ready"
+      - name: create-avd
+        if: env.apk_exists == 'true'
+        run: |
+          export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+          AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          if [ ! -x "$AVDMANAGER" ]; then
+            AVDMANAGER="$ANDROID_HOME/tools/bin/avdmanager"
+          fi
+          echo no | "$AVDMANAGER" create avd -n "${AVD_NAME}" -k "system-images;android-34;google_apis;x86_64" --force || true
       - name: run-emulator-and-capture
         if: env.apk_exists == 'true'
         continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
-          disable-animations: true
-          script: |
-            RUNID=${{ github.run_id }}
-            APK="${{ steps.find_apk.outputs.apk_path }}"
-            LOG_INSTALL="emulator-${RUNID}-install.txt"
-            LOG_LAUNCH="emulator-${RUNID}-launch.txt"
-            LOGCAT="emulator-${RUNID}-logcat.txt"
-            adb start-server || true
-            timeout=0
-            EMU_SERIAL=""
-            while [ $timeout -lt 300 ]; do
-              adb devices -l | awk '/emulator-/{print $1; exit}' | read -r EMU_SERIAL || true
-              if [ -n "$EMU_SERIAL" ]; then
+        run: |
+          export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+          EMU_BIN="$ANDROID_HOME/emulator/emulator"
+          EMU_OPTS="-no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -wipe-data"
+          APK="${{ steps.find_apk.outputs.apk_path }}"
+          RUNID=${{ github.run_id }}
+          LOGDIR="$GITHUB_WORKSPACE/emulator_logs_${RUNID}"
+          mkdir -p "$LOGDIR"
+          INSTALL_LOG="$LOGDIR/install.txt"
+          LAUNCH_LOG="$LOGDIR/launch.txt"
+          LOGCAT="$LOGDIR/logcat.txt"
+          adb kill-server || true
+          adb start-server || true
+          TIMEOUT_SEC=${EMU_BOOT_TIMEOUT_SEC}
+          "$EMU_BIN" -avd "${AVD_NAME}" $EMU_OPTS > "$LOGDIR/emulator_stdout.txt" 2> "$LOGDIR/emulator_stderr.txt" &
+          EMU_PID=$!
+          START_TS=$(date +%s)
+          FOUND_SERIAL=""
+          while [ $(( $(date +%s) - START_TS )) -lt $TIMEOUT_SEC ]; do
+            sleep 2
+            adb devices -l > "$LOGDIR/adb_devices.txt" 2>&1 || true
+            SERIAL=$(awk '/emulator-/{print $1; exit}' "$LOGDIR/adb_devices.txt" || true)
+            if [ -n "$SERIAL" ]; then
+              STATE=$(awk -v s="$SERIAL" '$1==s{print $2}' "$LOGDIR/adb_devices.txt" || true)
+              if [ "$STATE" = "device" ]; then
+                FOUND_SERIAL="$SERIAL"
                 break
               fi
-              sleep 2
-              timeout=$((timeout+2))
-            done
-            if [ -z "$EMU_SERIAL" ]; then
-              adb devices -l > "$LOGCAT" 2>&1 || true
-              echo "EMULATOR_NOT_FOUND" >> "$LOGCAT"
-            else
-              adb -s "$EMU_SERIAL" wait-for-device
-              boot_ok=0
-              for i in $(seq 1 60); do
-                bc=$(adb -s "$EMU_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-                if [ "$bc" = "1" ]; then
-                  boot_ok=1
-                  break
-                fi
-                sleep 2
-              done
-              if [ $boot_ok -ne 1 ]; then
-                adb -s "$EMU_SERIAL" logcat -d > "$LOGCAT" || true
-                echo "EMULATOR_BOOT_TIMEOUT" >> "$LOGCAT"
+              if [ "$STATE" = "offline" ]; then
+                adb kill-server || true
+                adb start-server || true
               fi
-              adb -s "$EMU_SERIAL" install -r "$APK" 2>&1 | tee "$LOG_INSTALL" || true
-              AAPT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/aapt"
-              if [ ! -x "$AAPT" ]; then
-                AAPT="$(which aapt || true)"
-              fi
-              PKG="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/package: name=/{print $2}' || true)"
-              MAINACT="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/launchable-activity: name=/{print $2}' || true)"
-              if [ -z "$PKG" ]; then
-                PKG="$(adb -s "$EMU_SERIAL" shell pm list packages -3 | head -n 1 | cut -d: -f2 || true)"
-              fi
-              echo "PACKAGE=$PKG" >> "$LOG_INSTALL"
-              echo "MAINACT=$MAINACT" >> "$LOG_INSTALL"
-              if [ -n "$MAINACT" ] && [ -n "$PKG" ]; then
-                adb -s "$EMU_SERIAL" shell am start -n "$PKG/$MAINACT" 2>&1 | tee "$LOG_LAUNCH" || true
-              elif [ -n "$PKG" ]; then
-                adb -s "$EMU_SERIAL" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tee "$LOG_LAUNCH" || true
-              else
-                echo "NO_PACKAGE_DETECTED" | tee "$LOG_LAUNCH" || true
-              fi
-              sleep 4
-              adb -s "$EMU_SERIAL" logcat -d > "$LOGCAT" || true
             fi
-            echo "$LOG_INSTALL" >> $GITHUB_STEP_SUMMARY
-            echo "$LOG_LAUNCH" >> $GITHUB_STEP_SUMMARY
-            echo "$LOGCAT" >> $GITHUB_STEP_SUMMARY
+          done
+          if [ -z "$FOUND_SERIAL" ]; then
+            echo "EMULATOR_SERIAL_NOT_READY" > "$LOGDIR/emulator_error.txt"
+            adb -s emulator-5554 logcat -d > "$LOGDIR/logcat_pre.txt" 2>/dev/null || true
+            kill -9 $EMU_PID || true
+            echo "EMULATOR failed to show as 'device' within timeout" >> "$LOGDIR/emulator_error.txt"
+            ls -la "$LOGDIR" || true
+            tar -czf "$LOGDIR.tar.gz" -C "$LOGDIR" . || true
+            exit 0
+          fi
+          adb -s "$FOUND_SERIAL" wait-for-device || true
+          BOOT_OK=0
+          for i in $(seq 1 $EMU_WAIT_FOR_DEVICE_SEC); do
+            bc=$(adb -s "$FOUND_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+            if [ "$bc" = "1" ]; then
+              BOOT_OK=1
+              break
+            fi
+            sleep 1
+          done
+          if [ $BOOT_OK -ne 1 ]; then
+            adb -s "$FOUND_SERIAL" logcat -d > "$LOGDIR/logcat_preboot.txt" || true
+            echo "EMULATOR_BOOT_TIMEOUT" > "$LOGDIR/emulator_error.txt"
+            kill -9 $EMU_PID || true
+            tar -czf "$LOGDIR.tar.gz" -C "$LOGDIR" . || true
+            exit 0
+          fi
+          adb -s "$FOUND_SERIAL" install -r "$APK" 2>&1 | tee "$INSTALL_LOG" || true
+          AAPT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/aapt"
+          if [ ! -x "$AAPT" ]; then
+            AAPT="$(which aapt || true)"
+          fi
+          PKG="$($AAPT dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' || true)"
+          MAINACT="$($AAPT dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' || true)"
+          echo "PACKAGE=$PKG" >> "$INSTALL_LOG"
+          echo "MAINACT=$MAINACT" >> "$INSTALL_LOG"
+          if [ -n "$MAINACT" ] && [ -n "$PKG" ]; then
+            adb -s "$FOUND_SERIAL" shell am start -n "$PKG/$MAINACT" 2>&1 | tee "$LAUNCH_LOG" || true
+          elif [ -n "$PKG" ]; then
+            adb -s "$FOUND_SERIAL" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tee "$LAUNCH_LOG" || true
+          else
+            echo "NO_PACKAGE_DETECTED" | tee "$LAUNCH_LOG" || true
+          fi
+          sleep 4
+          adb -s "$FOUND_SERIAL" logcat -d > "$LOGCAT" || true
+          adb -s "$FOUND_SERIAL" emu kill || true
+          kill -9 $EMU_PID || true
+          tar -czf "$LOGDIR.tar.gz" -C "$LOGDIR" . || true
+          echo "$LOGDIR.tar.gz"
       - name: build-emulator-errors
         if: always()
         run: |
           RUNID=${{ github.run_id }}
           OUT="ERRORS_emulator_${RUNID}.txt"
           echo "=== ERRORS emulator run $RUNID ===" > "$OUT"
-          for f in emulator-${RUNID}-*.txt downloaded_build/*; do
+          for f in emulator_logs_${RUNID}/* downloaded_build/*; do
             if [ -f "$f" ]; then
               echo "" >> "$OUT"
               echo "----- FILE: $f -----" >> "$OUT"
               echo "[WHERE] emulator file: $f" >> "$OUT"
               echo "[SYMPTOMS]" >> "$OUT"
-              grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR|SIGSEGV|Fatal signal|NoClassDefFoundError|UnsatisfiedLinkError" "$f" | sed -n '1,200p' >> "$OUT" || true
+              grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR|SIGSEGV|Fatal signal|NoClassDefFoundError|UnsatisfiedLinkError|EMULATOR" "$f" | sed -n '1,200p' >> "$OUT" || true
               echo "[CONTEXT: первые 200 строк]" >> "$OUT"
               sed -n '1,200p' "$f" >> "$OUT" || true
             fi
@@ -357,7 +380,7 @@ jobs:
         with:
           name: emulator-artifacts
           path: |
-            emulator-*.txt
+            emulator_logs_*/**
             ERRORS_emulator_*.txt
             downloaded_build/**
           if-no-files-found: warn
@@ -393,10 +416,10 @@ jobs:
           echo "FULL DIAGNOSTICS REPORT - RUN $RUNID" >> "$OUT"
           echo "==================================================" >> "$OUT"
           echo "" >> "$OUT"
-          echo "PRIORITY: Top extracted crash signatures (grep & uniq)" >> "$OUT"
+          echo "PRIORITY: Top extracted crash signatures" >> "$OUT"
           if [ -d artifacts/emulator ]; then
-            find artifacts/emulator -type f -name "emulator-*-logcat.txt" -print0 | while IFS= read -r -d '' f; do
-              grep -E "FATAL|AndroidRuntime|Exception|Caused by|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError" "$f" | sed -n '1,200p' >> "$OUT" || true
+            find artifacts/emulator -type f -name "logcat.txt" -print0 | while IFS= read -r -d '' f; do
+              grep -E "FATAL|AndroidRuntime|Exception|Caused by|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError|EMULATOR" "$f" | sed -n '1,200p' >> "$OUT" || true
             done
           fi
           echo "" >> "$OUT"
@@ -450,7 +473,7 @@ jobs:
             find artifacts/emulator -type f -name "emulator-*-logcat.txt" -print0 | while IFS= read -r -d '' f; do
               echo "" >> "$OUT"
               echo "----- $f (FATAL/Exception excerpt) -----" >> "$OUT"
-              grep -E "FATAL|AndroidRuntime|Exception|Caused by|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError" "$f" | sed -n '1,400p' >> "$OUT" || true
+              grep -E "FATAL|AndroidRuntime|Exception|Caused by|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError|EMULATOR" "$f" | sed -n '1,400p' >> "$OUT" || true
             done
           else
             echo "No emulator artifacts" >> "$OUT"
