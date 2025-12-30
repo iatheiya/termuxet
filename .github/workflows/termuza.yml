@@ -12,45 +12,42 @@ env:
 
 jobs:
   diagnostics:
-    name: diagnostics-tests-and-lint
+    name: diagnostics
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
           cache: gradle
-
       - run: chmod +x ./gradlew
-
-      - name: run-unit-tests-debug
+      - name: unit-tests-debug
         continue-on-error: true
         run: |
           set -o pipefail
-          OUT="$GITHUB_WORKSPACE/diagnostics-${{ github.run_id }}-unit-debug.txt"
-          ./gradlew testDebugUnitTest --stacktrace --info --no-daemon 2>&1 | tee "$OUT"
+          RUNID=${{ github.run_id }}
+          OUT="$GITHUB_WORKSPACE/diagnostics-${RUNID}-unit-debug.txt"
+          ./gradlew testDebugUnitTest --stacktrace --info --no-daemon 2>&1 | tee "$OUT" || true
           echo "$OUT" >> $GITHUB_STEP_SUMMARY
-
-      - name: run-unit-tests-release
+      - name: unit-tests-release
         continue-on-error: true
         run: |
           set -o pipefail
-          OUT="$GITHUB_WORKSPACE/diagnostics-${{ github.run_id }}-unit-release.txt"
-          ./gradlew testReleaseUnitTest --stacktrace --info --no-daemon 2>&1 | tee "$OUT"
+          RUNID=${{ github.run_id }}
+          OUT="$GITHUB_WORKSPACE/diagnostics-${RUNID}-unit-release.txt"
+          ./gradlew testReleaseUnitTest --stacktrace --info --no-daemon 2>&1 | tee "$OUT" || true
           echo "$OUT" >> $GITHUB_STEP_SUMMARY
-
-      - name: run-lint
+      - name: lint
         continue-on-error: true
         run: |
           set -o pipefail
-          OUT="$GITHUB_WORKSPACE/diagnostics-${{ github.run_id }}-lint.txt"
-          ./gradlew lint --stacktrace --info --no-daemon 2>&1 | tee "$OUT"
+          RUNID=${{ github.run_id }}
+          OUT="$GITHUB_WORKSPACE/diagnostics-${RUNID}-lint.txt"
+          ./gradlew lint --stacktrace --info --no-daemon 2>&1 | tee "$OUT" || true
           echo "$OUT" >> $GITHUB_STEP_SUMMARY
-
-      - name: build-diagnostics-errors-file
+      - name: build-diagnostics-errors
         if: always()
         run: |
           RUNID=${{ github.run_id }}
@@ -61,19 +58,22 @@ jobs:
               echo "" >> "$SUMMARY"
               echo "----- FILE: $f -----" >> "$SUMMARY"
               echo "" >> "$SUMMARY"
-              grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$GITHUB_WORKSPACE/$f" || true
+              echo "[WHERE] diagnostics step: $f" >> "$SUMMARY"
               echo "" >> "$SUMMARY"
-              echo "----- FULL FILE: $f BEGIN -----" >> "$SUMMARY"
-              cat "$GITHUB_WORKSPACE/$f" >> "$SUMMARY"
-              echo "----- FULL FILE: $f END -----" >> "$SUMMARY"
+              echo "[SYMPTOMS]" >> "$SUMMARY"
+              grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$GITHUB_WORKSPACE/$f" | sed -n '1,200p' >> "$SUMMARY" || true
+              echo "" >> "$SUMMARY"
+              echo "[CONTEXT: первые 200 строк файла]" >> "$SUMMARY"
+              sed -n '1,200p' "$GITHUB_WORKSPACE/$f" >> "$SUMMARY" || true
+              echo "" >> "$SUMMARY"
             fi
           done
           if [ -f app/build/reports/lint-results.html ]; then
             echo "" >> "$SUMMARY"
-            echo "----- LINT REPORT (html) path: app/build/reports/lint-results.html -----" >> "$SUMMARY"
+            echo "----- LINT REPORT path: app/build/reports/lint-results.html -----" >> "$SUMMARY"
           fi
           echo "$SUMMARY"
-      - name: upload-diagnostics-artifacts
+      - name: upload-diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -84,106 +84,24 @@ jobs:
             app/build/reports/
             app/build/test-results/
 
-  emulator:
-    name: emulator-runtime-diagnostics
-    runs-on: ubuntu-latest
-    timeout-minutes: 70
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: gradle
-
-      - uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 11076708
-
-      - name: ensure-ANDROID_HOME
-        run: |
-          if [ -d "$HOME/Android/Sdk" ]; then
-            echo "ANDROID_HOME=$HOME/Android/Sdk" >> $GITHUB_ENV
-          elif [ -n "$ANDROID_SDK_ROOT" ]; then
-            echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          else
-            echo "ANDROID_HOME=$HOME/.android/sdk" >> $GITHUB_ENV
-          fi
-
-      - name: install-system-image
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}" "system-images;android-34;google_apis;x86_64"
-
-      - run: chmod +x ./gradlew
-
-      - name: run-connected-tests-on-emulator
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
-          script: |
-            set -o pipefail
-            RUNID=${{ github.run_id }}
-            LOG="$GITHUB_WORKSPACE/emulator-${RUNID}-connected-tests.txt"
-            adb logcat -c
-            ./gradlew connectedReleaseAndroidTest --stacktrace --no-daemon 2>&1 | tee "$LOG" || true
-            adb logcat -d > "$GITHUB_WORKSPACE/emulator-${RUNID}-logcat.txt" || true
-            echo "$LOG" >> $GITHUB_STEP_SUMMARY
-            echo "$GITHUB_WORKSPACE/emulator-${RUNID}-logcat.txt" >> $GITHUB_STEP_SUMMARY
-
-      - name: build-emulator-errors-file
-        if: always()
-        run: |
-          RUNID=${{ github.run_id }}
-          SUMMARY="$GITHUB_WORKSPACE/ERRORS_emulator_${RUNID}.txt"
-          echo "=== ERRORS emulator run $RUNID ===" > "$SUMMARY"
-          for f in emulator-${RUNID}-*.txt; do
-            if [ -f "$GITHUB_WORKSPACE/$f" ]; then
-              echo "" >> "$SUMMARY"
-              echo "----- FILE: $f -----" >> "$SUMMARY"
-              echo "" >> "$SUMMARY"
-              grep -E "FATAL|Exception|Caused by|FAIL|ERROR|WARNING" "$GITHUB_WORKSPACE/$f" >> "$SUMMARY" || true
-              echo "" >> "$SUMMARY"
-              echo "----- FULL FILE: $f BEGIN -----" >> "$SUMMARY"
-              sed -n '1,200p' "$GITHUB_WORKSPACE/$f" >> "$SUMMARY" || true
-              echo "----- FULL FILE: $f END -----" >> "$SUMMARY"
-            fi
-          done
-          echo "$SUMMARY"
-
-      - name: upload-emulator-artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: emulator-artifacts
-          path: |
-            emulator-*.txt
-            ERRORS_emulator_*.txt
-
   build:
-    name: build-and-sign
+    name: build
     runs-on: ubuntu-latest
-    needs: [diagnostics, emulator]
+    needs: diagnostics
     if: always()
-    timeout-minutes: 80
+    timeout-minutes: 60
+    outputs:
+      apk_path: ${{ steps.find_apk.outputs.apk_path }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
           cache: gradle
-
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-
       - name: ensure-ANDROID_HOME
         run: |
           if [ -d "$HOME/Android/Sdk" ]; then
@@ -193,14 +111,11 @@ jobs:
           else
             echo "ANDROID_HOME=$HOME/.android/sdk" >> $GITHUB_ENV
           fi
-
       - name: install-sdk-components
         run: |
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
-
       - run: chmod +x ./gradlew
-
       - name: prepare-keystore
         id: keystore
         run: |
@@ -217,7 +132,6 @@ jobs:
             echo "key-alias=ci_release" >> $GITHUB_OUTPUT
             echo "key-password=android" >> $GITHUB_OUTPUT
           fi
-
       - name: assemble-release
         continue-on-error: true
         run: |
@@ -226,7 +140,6 @@ jobs:
           OUT="$GITHUB_WORKSPACE/build-${RUNID}-assemble.txt"
           ./gradlew clean assembleRelease --stacktrace --no-daemon 2>&1 | tee "$OUT" || true
           echo "$OUT" >> $GITHUB_STEP_SUMMARY
-
       - name: find-apk
         id: find_apk
         run: |
@@ -234,125 +147,234 @@ jobs:
           if [ -n "$apk_path" ]; then
             echo "apk_path=$apk_path" >> $GITHUB_OUTPUT
           fi
-
-      - name: sign-apk-if-present
-        id: sign
+      - name: native-check
         if: ${{ steps.find_apk.outputs.apk_path != '' }}
-        continue-on-error: true
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
-          set -e
           RUNID=${{ github.run_id }}
           APK="${{ steps.find_apk.outputs.apk_path }}"
-          ALIGNED="${APK%.*}-aligned.apk"
-          SIGNED="${APK%.*}-signed.apk"
-          ZIPALIGN="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/zipalign"
-          APKSIGNER="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
-          SIGNLOG="$GITHUB_WORKSPACE/build-${RUNID}-signing.txt"
-          "$ZIPALIGN" -v -f -p 4 "$APK" "$ALIGNED" 2>&1 | tee "$SIGNLOG" || true
-          "$APKSIGNER" sign --verbose \
-            --ks "${{ steps.keystore.outputs.keystore-path }}" \
-            --ks-pass "pass:${{ steps.keystore.outputs.keystore-password }}" \
-            --ks-key-alias "${{ steps.keystore.outputs.key-alias }}" \
-            --key-pass "pass:${{ steps.keystore.outputs.key-password }}" \
-            --out "$SIGNED" \
-            "$ALIGNED" 2>&1 | tee -a "$SIGNLOG" || true
-          "$APKSIGNER" verify --verbose "$SIGNED" 2>&1 | tee -a "$SIGNLOG" || true
-          echo "final_signed_apk=$SIGNED" >> $GITHUB_OUTPUT
-          echo "$SIGNLOG" >> $GITHUB_STEP_SUMMARY
-
-      - name: build-build-errors-file
-        if: always()
+          NATIVE_OUT="$GITHUB_WORKSPACE/build-${RUNID}-native-list.txt"
+          unzip -l "$APK" | awk '/lib\//{print $4}' > "$NATIVE_OUT" || true
+          echo "=== NATIVE LIBS LIST ===" > "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+          if [ -s "$NATIVE_OUT" ]; then
+            echo "[WHERE] build native check" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "[SYMPTOMS]" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            cat "$NATIVE_OUT" | sed -n '1,200p' >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt" || true
+            echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "[CONTEXT]" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "Detected native libraries inside APK. If your app loads native libraries at startup, ABI mismatch or missing libraries can cause instant process termination before any UI frame is drawn." >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+          else
+            echo "[WHERE] build native check" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "[SYMPTOMS] No native libraries found in APK (no lib/ entries)." >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "" >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+            echo "[CONTEXT] If APK has no native libs, early crashes are less likely to be native/ABI issues." >> "$GITHUB_WORKSPACE/ERRORS_build_native_${RUNID}.txt"
+          fi
+      - name: merged-manifest-and-resources
         run: |
           RUNID=${{ github.run_id }}
-          SUMMARY="$GITHUB_WORKSPACE/ERRORS_build_${RUNID}.txt"
-          echo "=== ERRORS build run $RUNID ===" > "$SUMMARY"
-          if [ -f "$GITHUB_WORKSPACE/build-${RUNID}-assemble.txt" ]; then
-            echo "" >> "$SUMMARY"
-            echo "----- ASSEMBLE LOG -----" >> "$SUMMARY"
-            grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$GITHUB_WORKSPACE/build-${RUNID}-assemble.txt" >> "$SUMMARY" || true
-            echo "" >> "$SUMMARY"
-            echo "----- ASSEMBLE FULL (first 400 lines) -----" >> "$SUMMARY"
-            sed -n '1,400p' "$GITHUB_WORKSPACE/build-${RUNID}-assemble.txt" >> "$SUMMARY" || true
+          SUMMARY="$GITHUB_WORKSPACE/ERRORS_build_manifest_${RUNID}.txt"
+          echo "=== MERGED MANIFEST & RESOURCES CHECK ===" > "$SUMMARY"
+          MM="$(find app/build -type f -path '*/merged_manifests/*/AndroidManifest.xml' -print -quit || true)"
+          if [ -z "$MM" ]; then
+            MM="$(find app/build -type f -path '*/manifests/*/AndroidManifest.xml' -print -quit || true)"
           fi
-          if [ -f "$GITHUB_WORKSPACE/build-${RUNID}-signing.txt" ]; then
+          if [ -n "$MM" ]; then
+            echo "[WHERE] merged manifest: $MM" >> "$SUMMARY"
             echo "" >> "$SUMMARY"
-            echo "----- SIGNING LOG -----" >> "$SUMMARY"
-            grep -E "ERROR|Exception|failed|Unsupported option|WARNING" "$GITHUB_WORKSPACE/build-${RUNID}-signing.txt" >> "$SUMMARY" || true
+            echo "[SYMPTOMS]" >> "$SUMMARY"
+            grep -E "android:exported|provider|authority|permission|uses-permission" "$MM" | sed -n '1,200p' >> "$SUMMARY" || true
             echo "" >> "$SUMMARY"
-            echo "----- SIGNING FULL (first 200 lines) -----" >> "$SUMMARY"
-            sed -n '1,200p' "$GITHUB_WORKSPACE/build-${RUNID}-signing.txt" >> "$SUMMARY" || true
-          fi
-          if [ -n "${{ steps.find_apk.outputs.apk_path }}" ]; then
-            echo "" >> "$SUMMARY"
-            echo "APK found: ${{ steps.find_apk.outputs.apk_path }}" >> "$SUMMARY"
+            echo "[CONTEXT]" >> "$SUMMARY"
+            echo "Merged manifest fragment above. Manifest issues (exported/provider/authority) often cause runtime crashes before UI appears." >> "$SUMMARY"
           else
+            echo "[WHERE] merged manifest not found in build tree" >> "$SUMMARY"
             echo "" >> "$SUMMARY"
-            echo "APK not found." >> "$SUMMARY"
+            echo "[CONTEXT] Could not locate merged manifest. This may indicate AGP path differences; check app/build/intermediates/." >> "$SUMMARY"
           fi
-          echo "$SUMMARY"
-
       - name: upload-build-artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
-            ERRORS_build_*.txt
             build-*-assemble.txt
-            build-*-signing.txt
+            ERRORS_build_native_*.txt
+            ERRORS_build_manifest_*.txt
             app/build/outputs/apk/**/*.apk
             app/build/outputs/mapping/**/mapping.txt
 
-  collect:
-    name: collect-and-aggregate-errors
+  emulator-launch:
+    name: emulator-launch-check
     runs-on: ubuntu-latest
-    needs: [diagnostics, emulator, build]
+    needs: build
     if: always()
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: download-diagnostics-artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-java@v4
         with:
-          name: diagnostics-artifacts
-          path: artifacts/diagnostics || true
-
-      - name: download-emulator-artifacts
-        uses: actions/download-artifact@v4
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - uses: android-actions/setup-android@v3
         with:
-          name: emulator-artifacts
-          path: artifacts/emulator || true
-
-      - name: download-build-artifacts
+          cmdline-tools-version: 11076708
+      - name: ensure-ANDROID_HOME
+        run: |
+          if [ -d "$HOME/Android/Sdk" ]; then
+            echo "ANDROID_HOME=$HOME/Android/Sdk" >> $GITHUB_ENV
+          elif [ -n "$ANDROID_SDK_ROOT" ]; then
+            echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          else
+            echo "ANDROID_HOME=$HOME/.android/sdk" >> $GITHUB_ENV
+          fi
+      - name: install-system-image
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-34" "build-tools;${{ env.BUILD_TOOLS_VERSION }}" "system-images;android-34;google_apis;x86_64"
+      - name: download-apk-from-build
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
           path: artifacts/build || true
+      - name: find-apk-in-artifact
+        id: find_apk
+        run: |
+          APK="$(find artifacts/build -type f -name "*.apk" | head -n 1 || true)"
+          if [ -n "$APK" ]; then
+            echo "apk_path=$APK" >> $GITHUB_OUTPUT
+          fi
+      - name: run-emulator-and-launch
+        if: ${{ steps.find_apk.outputs.apk_path != '' }}
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -o pipefail
+            RUNID=${{ github.run_id }}
+            APK="${{ steps.find_apk.outputs.apk_path }}"
+            LOG_INSTALL="$GITHUB_WORKSPACE/emulator-${RUNID}-install.txt"
+            LOG_LAUNCH="$GITHUB_WORKSPACE/emulator-${RUNID}-launch.txt"
+            LOGCAT="$GITHUB_WORKSPACE/emulator-${RUNID}-logcat.txt"
+            adb logcat -c
+            adb install -r "$APK" 2>&1 | tee "$LOG_INSTALL" || true
+            AAPT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/aapt"
+            if [ ! -x "$AAPT" ]; then
+              AAPT="$(which aapt || true)"
+            fi
+            PKG="$($AAPT dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' || true)"
+            MAINACT="$($AAPT dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' || true)"
+            if [ -z "$PKG" ]; then
+              echo "PACKAGE_NOT_FOUND" | tee -a "$LOG_INSTALL"
+            else
+              echo "PACKAGE=$PKG" >> "$LOG_INSTALL"
+              echo "MAINACT=$MAINACT" >> "$LOG_INSTALL"
+              adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tee "$LOG_LAUNCH" || true
+              sleep 4
+              adb logcat -d > "$LOGCAT" || true
+            fi
+            echo "$LOG_INSTALL" >> $GITHUB_STEP_SUMMARY
+            echo "$LOG_LAUNCH" >> $GITHUB_STEP_SUMMARY
+            echo "$LOGCAT" >> $GITHUB_STEP_SUMMARY
+      - name: build-emulator-errors
+        if: always()
+        run: |
+          RUNID=${{ github.run_id }}
+          OUT="$GITHUB_WORKSPACE/ERRORS_emulator_${RUNID}.txt"
+          echo "=== ERRORS emulator run $RUNID ===" > "$OUT"
+          for f in emulator-${RUNID}-*.txt artifacts/build/*; do
+            if [ -f "$f" ]; then
+              echo "" >> "$OUT"
+              echo "----- FILE: $f -----" >> "$OUT"
+              echo "" >> "$OUT"
+              echo "[WHERE] emulator check file: $f" >> "$OUT"
+              echo "" >> "$OUT"
+              echo "[SYMPTOMS]" >> "$OUT"
+              grep -E "FATAL|Exception|Caused by|FAIL|ERROR|WARNING|SIGSEGV|Fatal signal" "$f" | sed -n '1,200p' >> "$OUT" || true
+              echo "" >> "$OUT"
+              echo "[CONTEXT: первые 200 строк]" >> "$OUT"
+              sed -n '1,200p' "$f" >> "$OUT" || true
+            fi
+          done
+          echo "$OUT"
+      - name: upload-emulator-artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-artifacts
+          path: |
+            emulator-*.txt
+            ERRORS_emulator_*.txt
+            artifacts/build/**
 
-      - name: make-global-errors-summary
+  collect:
+    name: collect-summary
+    runs-on: ubuntu-latest
+    needs: [diagnostics, build, emulator-launch]
+    if: always()
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: download-diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: diagnostics-artifacts
+          path: artifacts/diagnostics || true
+      - name: download-build
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: artifacts/build || true
+      - name: download-emulator
+        uses: actions/download-artifact@v4
+        with:
+          name: emulator-artifacts
+          path: artifacts/emulator || true
+      - name: make-errors-summary
         run: |
           RUNID=${{ github.run_id }}
           OUT="$GITHUB_WORKSPACE/ERRORS_SUMMARY_${RUNID}.txt"
           echo "=== ERRORS SUMMARY run $RUNID ===" > "$OUT"
           echo "" >> "$OUT"
-          echo "=== diagnostics-artifacts/ ===" >> "$OUT"
+          echo "=== diagnostics ===" >> "$OUT"
           if [ -d artifacts/diagnostics ]; then
             find artifacts/diagnostics -type f -name "ERRORS_diagnostics_*.txt" -print0 | while IFS= read -r -d '' f; do
               echo "" >> "$OUT"
               echo "----- $f -----" >> "$OUT"
-              sed -n '1,800p' "$f" >> "$OUT" || true
+              sed -n '1,400p' "$f" >> "$OUT" || true
             done
             find artifacts/diagnostics -type f -name "diagnostics-*.txt" -print0 | while IFS= read -r -d '' f; do
               echo "" >> "$OUT"
-              echo "----- $f (grep excerpt) -----" >> "$OUT"
+              echo "----- excerpt $f -----" >> "$OUT"
               grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$f" | sed -n '1,200p' >> "$OUT" || true
             done
           fi
           echo "" >> "$OUT"
-          echo "=== emulator-artifacts/ ===" >> "$OUT"
+          echo "=== build ===" >> "$OUT"
+          if [ -d artifacts/build ]; then
+            find artifacts/build -type f -name "ERRORS_build_native_*.txt" -print0 | while IFS= read -r -d '' f; do
+              echo "" >> "$OUT"
+              echo "----- $f -----" >> "$OUT"
+              sed -n '1,400p' "$f" >> "$OUT" || true
+            done
+            find artifacts/build -type f -name "ERRORS_build_manifest_*.txt" -print0 | while IFS= read -r -d '' f; do
+              echo "" >> "$OUT"
+              echo "----- $f -----" >> "$OUT"
+              sed -n '1,400p' "$f" >> "$OUT" || true
+            done
+            find artifacts/build -type f -name "build-*-assemble.txt" -print0 | while IFS= read -r -d '' f; do
+              echo "" >> "$OUT"
+              echo "----- excerpt $f -----" >> "$OUT"
+              grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$f" | sed -n '1,200p' >> "$OUT" || true
+            done
+          fi
+          echo "" >> "$OUT"
+          echo "=== emulator ===" >> "$OUT"
           if [ -d artifacts/emulator ]; then
             find artifacts/emulator -type f -name "ERRORS_emulator_*.txt" -print0 | while IFS= read -r -d '' f; do
               echo "" >> "$OUT"
@@ -362,21 +384,7 @@ jobs:
             find artifacts/emulator -type f -name "emulator-*-logcat.txt" -print0 | while IFS= read -r -d '' f; do
               echo "" >> "$OUT"
               echo "----- $f (FATAL/Exception excerpt) -----" >> "$OUT"
-              grep -E "FATAL|Exception|Caused by" "$f" | sed -n '1,200p' >> "$OUT" || true
-            done
-          fi
-          echo "" >> "$OUT"
-          echo "=== build-artifacts/ ===" >> "$OUT"
-          if [ -d artifacts/build ]; then
-            find artifacts/build -type f -name "ERRORS_build_*.txt" -print0 | while IFS= read -r -d '' f; do
-              echo "" >> "$OUT"
-              echo "----- $f -----" >> "$OUT"
-              sed -n '1,800p' "$f" >> "$OUT" || true
-            done
-            find artifacts/build -type f -name "build-*-assemble.txt" -print0 | while IFS= read -r -d '' f; do
-              echo "" >> "$OUT"
-              echo "----- $f (grep excerpt) -----" >> "$OUT"
-              grep -E "FAIL|FAILURE|ERROR|Exception|FATAL|Caused by|WARNING" "$f" | sed -n '1,200p' >> "$OUT" || true
+              grep -E "FATAL|Exception|Caused by|SIGSEGV|Fatal signal" "$f" | sed -n '1,200p' >> "$OUT" || true
             done
           fi
           echo "" >> "$OUT"
