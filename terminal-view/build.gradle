@@ -34,8 +34,8 @@ dependencies {
 }
 
 task sourceJar(type: Jar) {
-    from android.sourceSets.main.java.srcDirs
-    classifier "sources"
+    from android.sourceSets.getByName("main").java.srcDirs
+    archiveClassifier = "sources"
 }
 
 afterEvaluate {
