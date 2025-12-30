@@ -70,16 +70,10 @@ jobs:
       - name: Find release APK
         id: find_apk
         run: |
-          echo "Searching for APK in app/build/outputs/apk..."
-          apk_path=$(find app/build/outputs/apk -type f -name "*.apk" ! -name "*-signed.apk" | head -n 1)
-
+          apk_path=$(find app/build/outputs/apk -type f -name "*.apk" ! -name "*-signed.apk" ! -name "*-aligned.apk" | head -n 1)
           if [ -z "$apk_path" ]; then
-            echo "Error: APK file not found!"
-            ls -R app/build/outputs/apk/
             exit 1
           fi
-
-          echo "Found APK at: $apk_path"
           echo "apk_path=$apk_path" >> $GITHUB_OUTPUT
 
       - name: Sign APK with apksigner
@@ -87,12 +81,12 @@ jobs:
         run: |
           set -e
           UNSIGNED_APK="${{ steps.find_apk.outputs.apk_path }}"
-          SIGNED_APK="${UNSIGNED_APK%.*}-signed.apk"
           ALIGNED_APK="${UNSIGNED_APK%.*}-aligned.apk"
+          SIGNED_APK="${UNSIGNED_APK%.*}-signed.apk"
           APKSIGNER_PATH="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
           ZIPALIGN_PATH="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/zipalign"
 
-          "$ZIPALIGN_PATH" -v -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+          "$ZIPALIGN_PATH" -v -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
 
           "$APKSIGNER_PATH" sign --verbose \
             --ks "${{ steps.keystore.outputs.keystore-path }}" \
@@ -102,13 +96,15 @@ jobs:
             --out "$SIGNED_APK" \
             "$ALIGNED_APK"
 
-          "$APKSIGNER_PATH" verify "$SIGNED_APK"
+          "$APKSIGNER_PATH" verify --verbose "$SIGNED_APK"
+          
+          echo "final_signed_apk=$SIGNED_APK" >> $GITHUB_OUTPUT
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
           name: release-apk-signed
-          path: app/build/outputs/apk/release/*-signed.apk
+          path: ${{ steps.sign_app.outputs.final_signed_apk }}
           if-no-files-found: error
 
       - name: Upload Mappings
