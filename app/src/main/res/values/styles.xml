@@ -1,17 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <style name="TermuxAlertDialogStyle" parent="@android:style/Theme.Material.Light.Dialog.Alert">
-        <!-- Seen in buttons on alert dialog: -->
-        <item name="android:colorAccent">#212121</item>
+    <style name="Theme.Termux.Material3" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/colorBackground</item>
+        <item name="android:statusBarColor">@color/colorPrimaryVariant</item>
+        <item name="android:navigationBarColor">@color/colorSurface</item>
+        <item name="android:windowLightStatusBar">false</item>
+
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorOnPrimary">@color/colorOnPrimary</item>
+        <item name="colorPrimaryContainer">@color/colorPrimaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/colorOnPrimaryContainer</item>
+
+        <item name="colorSecondary">@color/colorSecondary</item>
+        <item name="colorOnSecondary">@color/colorOnSecondary</item>
+        <item name="colorSecondaryContainer">@color/colorSecondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/colorOnSecondaryContainer</item>
+
+        <item name="android:colorBackground">@color/colorBackground</item>
+        <item name="colorOnBackground">@color/colorOnBackground</item>
+        <item name="colorSurface">@color/colorSurface</item>
+        <item name="colorOnSurface">@color/colorOnSurface</item>
+        <item name="colorSurfaceVariant">@color/colorSurfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/colorOnSurfaceVariant</item>
+        <item name="colorSurfaceTint">@color/colorSurfaceTint</item>
+
+        <item name="colorOutline">@color/colorOutline</item>
+        <item name="colorOutlineVariant">@color/colorOutlineVariant</item>
+
+        <item name="colorError">@color/colorError</item>
+        <item name="colorOnError">@color/colorOnError</item>
+
+        <item name="elevationOverlayEnabled">true</item>
+
+        <!-- Component shape defaults -->
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.Termux.SmallComponent</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.Termux.MediumComponent</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Termux.LargeComponent</item>
+
+        <!-- Typography (use custom text appearances below) -->
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.Termux.HeadlineLarge</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.Termux.BodyLarge</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.Termux.LabelLarge</item>
+
+        <!-- Widgets -->
+        <item name="materialButtonStyle">@style/Widget.Termux.Button</item>
+        <item name="floatingActionButtonStyle">@style/Widget.Termux.FloatingActionButton</item>
+        <item name="cardViewStyle">@style/Widget.Termux.Card</item>
+
+        <!-- Dialogs -->
+        <item name="android:dialogTheme">@style/TermuxAlertDialogStyle</item>
     </style>
 
-    <style name="TermuxActivity.Drawer.ButtonBarStyle.Light" parent="@style/Widget.MaterialComponents.Button.TextButton">
-        <item name="android:textColor">@color/black</item>
+    <style name="ShapeAppearance.Termux.SmallComponent" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item>
     </style>
 
-    <style name="TermuxActivity.Drawer.ButtonBarStyle.Dark" parent="@style/Widget.MaterialComponents.Button.TextButton">
-        <item name="android:textColor">@color/white</item>
+    <style name="ShapeAppearance.Termux.MediumComponent" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">12dp</item>
+    </style>
+
+    <style name="ShapeAppearance.Termux.LargeComponent" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
+    <style name="TextAppearance.Termux.HeadlineLarge" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?attr/colorOnBackground</item>
+    </style>
+
+    <style name="TextAppearance.Termux.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textColor">?attr/colorOnBackground</item>
+    </style>
+
+    <style name="TextAppearance.Termux.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?attr/colorOnBackground</item>
+    </style>
+
+    <style name="Widget.Termux.Button" parent="Widget.Material3.Button">
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.MediumComponent</item>
+        <item name="android:backgroundTint">@color/colorPrimary</item>
+        <item name="android:textColor">@color/colorOnPrimary</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+    </style>
+
+    <style name="Widget.Termux.FloatingActionButton" parent="Widget.Material3.FloatingActionButton.Primary">
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.LargeComponent</item>
+        <item name="android:backgroundTint">@color/colorPrimaryContainer</item>
+        <item name="android:tint">@color/colorOnPrimaryContainer</item>
+    </style>
+
+    <style name="Widget.Termux.Card" parent="Widget.Material3.Card">
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.LargeComponent</item>
+        <item name="cardUseCompatPadding">true</item>
+        <item name="cardPreventCornerOverlap">true</item>
+    </style>
+
+    <style name="TermuxActivity.Drawer.ButtonBarStyle.Light" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">@color/colorOnSurface</item>
+        <item name="android:backgroundTint">@color/colorSurfaceVariant</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.MediumComponent</item>
+    </style>
+
+    <style name="TermuxActivity.Drawer.ButtonBarStyle.Dark" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">@color/colorOnSurface</item>
+        <item name="android:backgroundTint">@color/colorSurfaceVariant</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.MediumComponent</item>
+    </style>
+
+    <style name="TermuxAlertDialogStyle" parent="Theme.Material3.Dark.Dialog.Alert">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="android:background">@color/colorSurface</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.Termux.MediumComponent</item>
+        <item name="android:textColor">@color/colorOnSurface</item>
+    </style>
+
+    <style name="TermuxExtraKeysView" parent="Theme.Material3.Dark">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorSurface">@color/colorSurface</item>
+        <item name="colorOnSurface">@color/colorOnSurface</item>
     </style>
 
 </resources>
