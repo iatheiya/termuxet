@@ -25,7 +25,6 @@
         <item name="android:windowAllowReturnTransitionOverlap">true</item>
         <item name="android:windowAllowEnterTransitionOverlap">true</item>
         <item name="android:windowContentTransitions">true</item>
-        <item name="android:statusBarForeground">@color/colorOnPrimary</item>
 
         <item name="buttonBarButtonStyle">@style/TermuxActivity.Drawer.ButtonBarStyle.Light</item>
         <item name="termuxActivityDrawerBackground">@color/colorSurface</item>
@@ -36,8 +35,8 @@
         <item name="extraKeysButtonBackgroundColor">@color/colorSurfaceVariant</item>
         <item name="extraKeysButtonActiveBackgroundColor">@color/colorPrimaryContainer</item>
 
-        <item name="android:statusBarContrastEnforced">true</item>
-        <item name="android:navigationBarContrastEnforced">true</item>
+        <item name="android:enforceStatusBarContrast">true</item>
+        <item name="android:enforceNavigationBarContrast">true</item>
         <item name="android:windowElevation">8dp</item>
     </style>
 
