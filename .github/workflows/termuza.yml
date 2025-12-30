@@ -1,4 +1,4 @@
-name: termuza-deep-scan
+name: termuza
 
 on:
   push:
@@ -251,7 +251,6 @@ jobs:
           path: downloaded_build
       - name: list-downloaded
         run: |
-          echo "Listing downloaded_build"
           ls -la downloaded_build || true
           find downloaded_build -type f -name "*.apk" -print || true
       - name: find-apk
@@ -280,26 +279,57 @@ jobs:
             LOG_INSTALL="emulator-${RUNID}-install.txt"
             LOG_LAUNCH="emulator-${RUNID}-launch.txt"
             LOGCAT="emulator-${RUNID}-logcat.txt"
-            adb logcat -c
-            adb install -r "$APK" 2>&1 | tee "$LOG_INSTALL" || true
-            AAPT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/aapt"
-            if [ ! -x "$AAPT" ]; then
-              AAPT="$(which aapt || true)"
-            fi
-            PKG="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/package: name=/{print $2}' || true)"
-            MAINACT="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/launchable-activity: name=/{print $2}' || true)"
-            if [ -z "$PKG" ]; then
-              PKG="$(adb shell pm list packages -3 | head -n 1 | cut -d: -f2 || true)"
-            fi
-            echo "PACKAGE=$PKG" >> "$LOG_INSTALL"
-            echo "MAINACT=$MAINACT" >> "$LOG_INSTALL"
-            if [ -n "$MAINACT" ]; then
-              adb shell am start -n "$PKG/$MAINACT" 2>&1 | tee "$LOG_LAUNCH" || true
+            adb start-server || true
+            timeout=0
+            EMU_SERIAL=""
+            while [ $timeout -lt 300 ]; do
+              adb devices -l | awk '/emulator-/{print $1; exit}' | read -r EMU_SERIAL || true
+              if [ -n "$EMU_SERIAL" ]; then
+                break
+              fi
+              sleep 2
+              timeout=$((timeout+2))
+            done
+            if [ -z "$EMU_SERIAL" ]; then
+              adb devices -l > "$LOGCAT" 2>&1 || true
+              echo "EMULATOR_NOT_FOUND" >> "$LOGCAT"
             else
-              adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tee "$LOG_LAUNCH" || true
+              adb -s "$EMU_SERIAL" wait-for-device
+              boot_ok=0
+              for i in $(seq 1 60); do
+                bc=$(adb -s "$EMU_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+                if [ "$bc" = "1" ]; then
+                  boot_ok=1
+                  break
+                fi
+                sleep 2
+              done
+              if [ $boot_ok -ne 1 ]; then
+                adb -s "$EMU_SERIAL" logcat -d > "$LOGCAT" || true
+                echo "EMULATOR_BOOT_TIMEOUT" >> "$LOGCAT"
+              fi
+              adb -s "$EMU_SERIAL" install -r "$APK" 2>&1 | tee "$LOG_INSTALL" || true
+              AAPT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/aapt"
+              if [ ! -x "$AAPT" ]; then
+                AAPT="$(which aapt || true)"
+              fi
+              PKG="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/package: name=/{print $2}' || true)"
+              MAINACT="$($AAPT dump badging "$APK" 2>/dev/null | awk -F\"'\" '/launchable-activity: name=/{print $2}' || true)"
+              if [ -z "$PKG" ]; then
+                PKG="$(adb -s "$EMU_SERIAL" shell pm list packages -3 | head -n 1 | cut -d: -f2 || true)"
+              fi
+              echo "PACKAGE=$PKG" >> "$LOG_INSTALL"
+              echo "MAINACT=$MAINACT" >> "$LOG_INSTALL"
+              if [ -n "$MAINACT" ] && [ -n "$PKG" ]; then
+                adb -s "$EMU_SERIAL" shell am start -n "$PKG/$MAINACT" 2>&1 | tee "$LOG_LAUNCH" || true
+              elif [ -n "$PKG" ]; then
+                adb -s "$EMU_SERIAL" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tee "$LOG_LAUNCH" || true
+              else
+                echo "NO_PACKAGE_DETECTED" | tee "$LOG_LAUNCH" || true
+              fi
+              sleep 4
+              adb -s "$EMU_SERIAL" logcat -d > "$LOGCAT" || true
             fi
-            sleep 4
-            adb logcat -d > "$LOGCAT" || true
             echo "$LOG_INSTALL" >> $GITHUB_STEP_SUMMARY
             echo "$LOG_LAUNCH" >> $GITHUB_STEP_SUMMARY
             echo "$LOGCAT" >> $GITHUB_STEP_SUMMARY
