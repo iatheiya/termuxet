@@ -50,17 +50,24 @@ jobs:
 
       - name: Prepare signing keystore
         id: keystore
+        shell: bash
         run: |
           set -eux
-          # If keystore is provided via secrets (base64), decode it; otherwise generate a temporary keystore for CI.
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "Using keystore from env ANDROID_KEYSTORE_BASE64"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+            KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-android}"
+            KEY_ALIAS="${ANDROID_KEY_ALIAS:-ci_release}"
+            KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          elif [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
             echo "Using keystore from secrets"
             echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
             KEYSTORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
             KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
             KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}"
           else
-            echo "No keystore secret found — generating temporary keystore for CI (not for Play Store releases)"
+            echo "No keystore secret found — generating temporary keystore for CI"
             KEYSTORE_PASSWORD=android
             KEY_ALIAS=ci_release
             KEY_PASSWORD=android
@@ -73,67 +80,64 @@ jobs:
               -dname "CN=CI, OU=CI, O=CI, L=CI, ST=CI, C=US"
           fi
 
-          # export outputs for later steps
-          echo "keystore-path=release.keystore" >> $GITHUB_OUTPUT
-          echo "keystore-password=$KEYSTORE_PASSWORD" >> $GITHUB_OUTPUT
-          echo "key-alias=$KEY_ALIAS" >> $GITHUB_OUTPUT
-          echo "key-password=$KEY_PASSWORD" >> $GITHUB_OUTPUT
+          echo "keystore-path=release.keystore" >> "$GITHUB_OUTPUT"
+          echo "keystore-password=$KEYSTORE_PASSWORD" >> "$GITHUB_OUTPUT"
+          echo "key-alias=$KEY_ALIAS" >> "$GITHUB_OUTPUT"
+          echo "key-password=$KEY_PASSWORD" >> "$GITHUB_OUTPUT"
 
       - name: Assemble release APK
         run: |
           set -eux
           ./gradlew clean assembleRelease --no-daemon
 
-      - name: Find release APK (unsigned or signed) 
+      - name: Find release APK
         id: find_apk
+        shell: bash
         run: |
           set -eux
-          # prefer unsigned apk if present, fallback to any release apk
           apk=$(find . -type f -path "*/build/outputs/apk/*/release/*-unsigned.apk" | head -n1 || true)
           if [ -z "$apk" ]; then
-            apk=$(find . -type f -path "*/build/outputs/apk/*/release/*.apk" | grep -v '\-aligned' | head -n1 || true)
+            apk=$(find . -type f -path "*/build/outputs/apk/*/release/*.apk" | grep -v '-aligned' | head -n1 || true)
           fi
           if [ -z "$apk" ]; then
             echo "No release APK found" >&2
             exit 1
           fi
-          echo "apk=$apk" >> $GITHUB_OUTPUT
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
           echo "Found release APK: $apk"
 
       - name: Sign APK with apksigner
         id: sign
+        shell: bash
         run: |
           set -eux
           unsigned="${{ steps.find_apk.outputs.apk }}"
-          # output path — same directory, appended '-signed.apk'
           out_signed="${unsigned%.*}-signed.apk"
 
-          # detect apksigner location
           if [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -x "${ANDROID_SDK_ROOT}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner" ]; then
             apksigner="${ANDROID_SDK_ROOT}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
           else
-            apksigner=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n1)/apksigner
+            apksigner="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -n1)/apksigner"
           fi
 
           echo "Using apksigner: $apksigner"
 
-          # sign
           "$apksigner" sign \
             --ks "${{ steps.keystore.outputs.keystore-path }}" \
             --ks-pass "pass:${{ steps.keystore.outputs.keystore-password }}" \
             --key-pass "pass:${{ steps.keystore.outputs.key-password }}" \
             --out "$out_signed" "$unsigned"
 
-          # verify
           "$apksigner" verify "$out_signed"
 
-          echo "signed_apk=$out_signed" >> $GITHUB_OUTPUT
+          echo "signed_apk=$out_signed" >> "$GITHUB_OUTPUT"
           echo "Signed APK: $out_signed"
 
-      - name: Collect mapping / metadata (if present)
+      - name: Collect mapping / metadata
+        shell: bash
         run: |
           set -eux
-          mkdir -p release_artifacts || true
+          mkdir -p release_artifacts
           mapping=$(find . -type f -path "*/build/outputs/mapping/*/mapping.txt" | head -n1 || true)
           if [ -n "$mapping" ]; then
             echo "Found mapping: $mapping"
@@ -142,7 +146,7 @@ jobs:
             echo "No mapping file found"
           fi
 
-      - name: Upload artifacts — signed + found + mapping
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: termuza-release-apks
