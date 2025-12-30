@@ -7,30 +7,16 @@ ext {
 }
 
 android {
-    compileSdk 34
+    namespace "com.termux"
     
-    ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
+    compileSdk 34
+
+    ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: "26.1.10909125"
+
     def appVersionName = System.getenv("TERMUX_APP_VERSION_NAME") ?: ""
     def apkVersionTag = System.getenv("TERMUX_APK_VERSION_TAG") ?: ""
     def splitAPKsForDebugBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS") ?: "1"
     def splitAPKsForReleaseBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0"
-
-    dependencies {
-        implementation "androidx.annotation:annotation:1.7.0"
-        implementation "androidx.core:core:1.12.0"
-        implementation "androidx.drawerlayout:drawerlayout:1.2.0"
-        implementation "androidx.preference:preference:1.2.1"
-        implementation "androidx.viewpager:viewpager:1.0.0"
-        implementation "com.google.android.material:material:1.11.0"
-        implementation "com.google.guava:guava:31.1-jre"
-        implementation "io.noties.markwon:core:$markwonVersion"
-        implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
-        implementation "io.noties.markwon:linkify:$markwonVersion"
-        implementation "io.noties.markwon:recycler:$markwonVersion"
-
-        implementation project(":terminal-view")
-        implementation project(":termux-shared")
-    }
 
     defaultConfig {
         applicationId "com.termux"
@@ -70,6 +56,11 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = true
+        viewBinding = true 
+    }
+
     signingConfigs {
         debug {
             storeFile file('testkey_untrusted.jks')
@@ -105,12 +96,7 @@ android {
     lintOptions {
         disable 'ProtectedPermissions'
         abortOnError false
-    }
-
-    testOptions {
-        unitTests {
-            includeAndroidResources = true
-        }
+        checkReleaseBuilds false
     }
 
     packagingOptions {
@@ -128,9 +114,24 @@ android {
 }
 
 dependencies {
+    implementation "androidx.annotation:annotation:1.7.0"
+    implementation "androidx.core:core:1.12.0"
+    implementation "androidx.drawerlayout:drawerlayout:1.2.0"
+    implementation "androidx.preference:preference:1.2.1"
+    implementation "androidx.viewpager:viewpager:1.0.0"
+    implementation "com.google.android.material:material:1.11.0"
+    implementation "com.google.guava:guava:31.1-jre"
+    implementation "io.noties.markwon:core:$markwonVersion"
+    implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
+    implementation "io.noties.markwon:linkify:$markwonVersion"
+    implementation "io.noties.markwon:recycler:$markwonVersion"
+
+    implementation project(":terminal-view")
+    implementation project(":termux-shared")
+
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.robolectric:robolectric:4.10"
-    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:1.1.5"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
 }
 
 task versionName {
