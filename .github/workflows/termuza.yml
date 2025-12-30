@@ -79,6 +79,8 @@ jobs:
 
       - name: Sign APK with apksigner
         id: sign_app
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
           set -e
           UNSIGNED_APK="${{ steps.find_apk.outputs.apk_path }}"
@@ -92,7 +94,7 @@ jobs:
           "$APKSIGNER_PATH" sign --verbose \
             --ks "${{ steps.keystore.outputs.keystore-path }}" \
             --ks-pass "pass:${{ steps.keystore.outputs.keystore-password }}" \
-            --key-alias "${{ steps.keystore.outputs.key-alias }}" \
+            --ks-key-alias "${{ steps.keystore.outputs.key-alias }}" \
             --key-pass "pass:${{ steps.keystore.outputs.key-password }}" \
             --out "$SIGNED_APK" \
             "$ALIGNED_APK"
