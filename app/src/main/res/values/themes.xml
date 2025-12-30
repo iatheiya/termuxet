@@ -14,7 +14,6 @@
         <item name="android:colorBackgroundFloating">@color/colorSurfaceVariant</item>
         <item name="android:actionBarStyle">@style/Widget.Material3.ActionBar</item>
         <item name="android:homeAsUpIndicator">@drawable/ic_arrow_back_24</item>
-        <item name="materialCardViewStyle">@style/Widget.Material3.CardView</item>
         <item name="materialButtonStyle">@style/Widget.Termux.Button</item>
         <item name="materialCardViewStyle">@style/Widget.Termux.Card</item>
     </style>
@@ -85,21 +84,6 @@
         <item name="android:background">@color/colorInverseSurface</item>
         <item name="android:titleTextStyle">@style/TextAppearance.Termux.HeadlineLarge</item>
         <item name="android:popupTheme">@style/Theme.TermuxApp.Light.NoActionBar</item>
-    </style>
-
-    <style name="Widget.Termux.Card" parent="Widget.Material3.Card">
-        <item name="cardCornerRadius">16dp</item>
-        <item name="cardElevation">4dp</item>
-        <item name="android:foreground">@drawable/ripple_selector</item>
-    </style>
-
-    <style name="Widget.Termux.Button" parent="Widget.Material3.Button">
-        <item name="android:minHeight">40dp</item>
-        <item name="android:paddingLeft">16dp</item>
-        <item name="android:paddingRight">16dp</item>
-        <item name="android:textAllCaps">false</item>
-        <item name="android:backgroundTint">@color/colorPrimary</item>
-        <item name="android:textColor">@color/colorOnPrimary</item>
     </style>
 
 </resources>
