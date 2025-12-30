@@ -33,22 +33,18 @@
 
         <item name="elevationOverlayEnabled">true</item>
 
-        <!-- Component shape defaults -->
         <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.Termux.SmallComponent</item>
         <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.Termux.MediumComponent</item>
         <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Termux.LargeComponent</item>
 
-        <!-- Typography (use custom text appearances below) -->
         <item name="textAppearanceHeadlineLarge">@style/TextAppearance.Termux.HeadlineLarge</item>
         <item name="textAppearanceBodyLarge">@style/TextAppearance.Termux.BodyLarge</item>
         <item name="textAppearanceLabelLarge">@style/TextAppearance.Termux.LabelLarge</item>
 
-        <!-- Widgets -->
         <item name="materialButtonStyle">@style/Widget.Termux.Button</item>
         <item name="floatingActionButtonStyle">@style/Widget.Termux.FloatingActionButton</item>
         <item name="cardViewStyle">@style/Widget.Termux.Card</item>
 
-        <!-- Dialogs -->
         <item name="android:dialogTheme">@style/TermuxAlertDialogStyle</item>
     </style>
 
@@ -89,6 +85,7 @@
         <item name="android:minHeight">40dp</item>
         <item name="android:paddingLeft">16dp</item>
         <item name="android:paddingRight">16dp</item>
+        <item name="android:textAllCaps">false</item>
     </style>
 
     <style name="Widget.Termux.FloatingActionButton" parent="Widget.Material3.FloatingActionButton.Primary">
@@ -101,6 +98,8 @@
         <item name="shapeAppearance">@style/ShapeAppearance.Termux.LargeComponent</item>
         <item name="cardUseCompatPadding">true</item>
         <item name="cardPreventCornerOverlap">true</item>
+        <item name="cardElevation">4dp</item>
+        <item name="android:foreground">@drawable/ripple_selector</item>
     </style>
 
     <style name="TermuxActivity.Drawer.ButtonBarStyle.Light" parent="Widget.Material3.Button.TextButton">
