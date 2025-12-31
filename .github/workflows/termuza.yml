@@ -7,9 +7,9 @@ on:
     branches: [master, main]
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+#concurrency:
+  #group: ${{ github.workflow }}-${{ github.ref }}
+  #cancel-in-progress: true
 
 env:
   JAVA_VERSION: '17'
@@ -249,7 +249,7 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel on -no-snapshot-save -no-metrics
           emulator-boot-timeout: ${{ env.EMU_BOOT_TIMEOUT_SEC }}
           script: |
-            set -euxo pipefail
+            set -eux
             mkdir -p emulator_logs
             adb devices -l > emulator_logs/adb_devices_before.txt || true
             adb wait-for-device
@@ -342,3 +342,4 @@ jobs:
         with:
           name: FINAL_REPORT
           path: FULL_STRICT_REPORT.txt
+```0
