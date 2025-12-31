@@ -1,489 +1,489 @@
 name: termuza
 
 on:
-  push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
-  workflow_dispatch:
+push:
+branches: [master, main]
+pull_request:
+branches: [master, main]
+workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+group: ${{ github.workflow }}-${{ github.ref }}
+cancel-in-progress: true
 
 env:
-  JAVA_VERSION: '17'
-  API_LEVEL: '30'
-  ANDROID_TARGET: 'aosp_atd'
-  ANDROID_ARCH: 'x86_64'
-  AVD_NAME: 'ci_optimized'
-  EMU_BOOT_TIMEOUT_SEC: '900'
-  EMU_WAIT_FOR_DEVICE_SEC: '900'
-  ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
-  MIN_FREE_KB: '10000000'
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3072m -XX:+UseParallelGC"
+JAVA_VERSION: '17'
+API_LEVEL: '30'
+ANDROID_TARGET: 'aosp_atd'
+ANDROID_ARCH: 'x86_64'
+AVD_NAME: 'ci_optimized'
+EMU_BOOT_TIMEOUT_SEC: '900'
+EMU_WAIT_FOR_DEVICE_SEC: '900'
+ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
+MIN_FREE_KB: '10000000'
+GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3072m -XX:+UseParallelGC"
 
 jobs:
-  diagnostics:
-    name: diagnostics
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-      - run: chmod +x ./gradlew
-      - name: collect-system-info
-        run: |
-          mkdir -p diagnostics_out
-          if [ -r /dev/kvm ]; then
-            echo "kvm_available=true" > diagnostics_out/kvm.txt
-          else
-            echo "kvm_available=false" > diagnostics_out/kvm.txt
-          fi
-          uname -a > diagnostics_out/uname.txt 2>&1 || true
-          cat /proc/cpuinfo > diagnostics_out/cpuinfo.txt 2>/dev/null || true
-          lsmod | grep kvm > diagnostics_out/kvm_modules.txt 2>/dev/null || true
-          java -version > diagnostics_out/java_version.txt 2>&1 || true
-      - name: unit-tests-debug
-        continue-on-error: true
-        run: |
-          mkdir -p diagnostics_out
-          RUNID=${{ github.run_id }}
-          OUT="diagnostics_out/diagnostics-${RUNID}-unit-debug.txt"
-          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee "$OUT" || true
-      - name: lint-check
-        continue-on-error: true
-        run: |
-          mkdir -p diagnostics_out
-          RUNID=${{ github.run_id }}
-          OUT="diagnostics_out/diagnostics-${RUNID}-lint.txt"
-          ./gradlew lint --stacktrace 2>&1 | tee "$OUT" || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: diagnostics-data
-          path: diagnostics_out
-          if-no-files-found: warn
+diagnostics:
+name: diagnostics
+runs-on: ubuntu-latest
+timeout-minutes: 25
+steps:
+- uses: actions/checkout@v4
+- uses: actions/setup-java@v4
+with:
+distribution: temurin
+java-version: ${{ env.JAVA_VERSION }}
+cache: gradle
+- run: chmod +x ./gradlew
+- name: collect-system-info
+run: |
+mkdir -p diagnostics_out
+if [ -r /dev/kvm ]; then
+echo "kvm_available=true" > diagnostics_out/kvm.txt
+else
+echo "kvm_available=false" > diagnostics_out/kvm.txt
+fi
+uname -a > diagnostics_out/uname.txt 2>&1 || true
+cat /proc/cpuinfo > diagnostics_out/cpuinfo.txt 2>/dev/null || true
+lsmod | grep kvm > diagnostics_out/kvm_modules.txt 2>/dev/null || true
+java -version > diagnostics_out/java_version.txt 2>&1 || true
+- name: unit-tests-debug
+continue-on-error: true
+run: |
+mkdir -p diagnostics_out
+RUNID=${{ github.run_id }}
+OUT="diagnostics_out/diagnostics-${RUNID}-unit-debug.txt"
+./gradlew testDebugUnitTest --stacktrace 2>&1 | tee "$OUT" || true
+- name: lint-check
+continue-on-error: true
+run: |
+mkdir -p diagnostics_out
+RUNID=${{ github.run_id }}
+OUT="diagnostics_out/diagnostics-${RUNID}-lint.txt"
+./gradlew lint --stacktrace 2>&1 | tee "$OUT" || true
+- uses: actions/upload-artifact@v4
+if: always()
+with:
+name: diagnostics-data
+path: diagnostics_out
+if-no-files-found: warn
 
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    needs: diagnostics
-    if: always()
-    timeout-minutes: 50
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: gradle
-      - uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 11076708
-      - run: chmod +x ./gradlew
-      - name: prepare-keystore
-        run: |
-          mkdir -p build_out
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
-          else
-            keytool -genkeypair -v -keystore release.keystore -alias ci_release -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CI,OU=CI,O=CI,L=CI,ST=CI,C=US"
-          fi
-      - name: assemble-release
-        continue-on-error: true
-        run: |
-          mkdir -p build_out
-          RUNID=${{ github.run_id }}
-          OUT="build_out/build-${RUNID}-assemble.txt"
-          ./gradlew clean assembleRelease --stacktrace 2>&1 | tee "$OUT" || true
-      - name: find-and-collect-apks
-        id: find_apk
-        run: |
-          mkdir -p build_out/apk
-          TMP=$(mktemp)
-          find app/build/outputs/apk -type f -name "*.apk" -print0 > "$TMP" 2>/dev/null || true
-          SELECTED=""
-          if [ -s "$TMP" ]; then
-            while IFS= read -r -d '' a; do
-              if unzip -l "$a" 2>/dev/null | grep -q "lib/x86_64/"; then
-                SELECTED="$a"
-                break
-              fi
-            done < "$TMP"
-            if [ -z "$SELECTED" ]; then
-              while IFS= read -r -d '' a; do
-                if unzip -l "$a" 2>/dev/null | grep -q "lib/x86/"; then
-                  SELECTED="$a"
-                  break
-                fi
-              done < "$TMP"
-            fi
-            if [ -z "$SELECTED" ]; then
-              SELECTED=$(tr '\0' '\n' < "$TMP" | head -n1 || true)
-            fi
-          fi
-          rm -f "$TMP" || true
-          if [ -n "$SELECTED" ]; then
-            cp "$SELECTED" build_out/apk/ || true
-            echo "apk_path=build_out/apk/$(basename "$SELECTED")" >> $GITHUB_OUTPUT
-            echo "apk_exists=true" >> $GITHUB_ENV
-          else
-            echo "apk_exists=false" >> $GITHUB_ENV
-          fi
-      - name: analyze-artifacts
-        run: |
-          mkdir -p build_out
-          APK_PATH="$(find build_out/apk -type f -name "*.apk" | head -n 1 || true)"
-          if [ -n "$APK_PATH" ]; then
-            if unzip -l "$APK_PATH" > /dev/null 2>&1; then
-              unzip -l "$APK_PATH" | awk '/lib\//{print $4}' > build_out/native_libs_structure.txt || echo "NO_NATIVE_LIBS" > build_out/native_libs_structure.txt
-            else
-              echo "UNZIP_ERROR" > build_out/native_libs_structure.txt
-            fi
-          else
-            echo "NO_APK_FOR_ANALYSIS" > build_out/native_libs_structure.txt
-          fi
-          MM="$(find app/build -type f -path '*/merged_manifests/*/AndroidManifest.xml' -print -quit || true)"
-          if [ -z "$MM" ]; then
-            MM="$(find app/build -type f -name AndroidManifest.xml -print -quit || true)"
-          fi
-          if [ -n "$MM" ]; then
-            grep -E "android:exported|provider|authority|permission|uses-permission|launchable-activity" "$MM" | sed -n '1,200p' > build_out/manifest_analysis.txt || true
-          else
-            echo "MANIFEST_NOT_FOUND" > build_out/manifest_analysis.txt
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: build-data
-          path: build_out
-          if-no-files-found: warn
+build:
+name: build
+runs-on: ubuntu-latest
+needs: diagnostics
+if: always()
+timeout-minutes: 50
+steps:
+- uses: actions/checkout@v4
+- uses: actions/setup-java@v4
+with:
+distribution: temurin
+java-version: ${{ env.JAVA_VERSION }}
+cache: gradle
+- uses: android-actions/setup-android@v3
+with:
+cmdline-tools-version: 11076708
+- run: chmod +x ./gradlew
+- name: prepare-keystore
+run: |
+mkdir -p build_out
+if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
+else
+keytool -genkeypair -v -keystore release.keystore -alias ci_release -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CI,OU=CI,O=CI,L=CI,ST=CI,C=US"
+fi
+- name: assemble-release
+continue-on-error: true
+run: |
+mkdir -p build_out
+RUNID=${{ github.run_id }}
+OUT="build_out/build-${RUNID}-assemble.txt"
+./gradlew clean assembleRelease --stacktrace 2>&1 | tee "$OUT" || true
+- name: find-and-collect-apks
+id: find_apk
+run: |
+mkdir -p build_out/apk
+TMP=$(mktemp)
+find app/build/outputs/apk -type f -name ".apk" -print0 > "$TMP" 2>/dev/null || true
+SELECTED=""
+if [ -s "$TMP" ]; then
+while IFS= read -r -d '' a; do
+if unzip -l "$a" 2>/dev/null | grep -q "lib/x86_64/"; then
+SELECTED="$a"
+break
+fi
+done < "$TMP"
+if [ -z "$SELECTED" ]; then
+while IFS= read -r -d '' a; do
+if unzip -l "$a" 2>/dev/null | grep -q "lib/x86/"; then
+SELECTED="$a"
+break
+fi
+done < "$TMP"
+fi
+if [ -z "$SELECTED" ]; then
+SELECTED=$(tr '\0' '\n' < "$TMP" | head -n1 || true)
+fi
+fi
+rm -f "$TMP" || true
+if [ -n "$SELECTED" ]; then
+cp "$SELECTED" build_out/apk/ || true
+echo "apk_path=build_out/apk/$(basename "$SELECTED")" >> $GITHUB_OUTPUT
+echo "apk_exists=true" >> $GITHUB_ENV
+else
+echo "apk_exists=false" >> $GITHUB_ENV
+fi
+- name: analyze-artifacts
+run: |
+mkdir -p build_out
+APK_PATH="$(find build_out/apk -type f -name ".apk" | head -n 1 || true)"
+if [ -n "$APK_PATH" ]; then
+if unzip -l "$APK_PATH" > /dev/null 2>&1; then
+unzip -l "$APK_PATH" | awk '/lib//{print $4}' > build_out/native_libs_structure.txt || echo "NO_NATIVE_LIBS" > build_out/native_libs_structure.txt
+else
+echo "UNZIP_ERROR" > build_out/native_libs_structure.txt
+fi
+else
+echo "NO_APK_FOR_ANALYSIS" > build_out/native_libs_structure.txt
+fi
+MM="$(find app/build -type f -path '/merged_manifests//AndroidManifest.xml' -print -quit || true)"
+if [ -z "$MM" ]; then
+MM="$(find app/build -type f -name AndroidManifest.xml -print -quit || true)"
+fi
+if [ -n "$MM" ]; then
+grep -E "android:exported|provider|authority|permission|uses-permission|launchable-activity" "$MM" | sed -n '1,200p' > build_out/manifest_analysis.txt || true
+else
+echo "MANIFEST_NOT_FOUND" > build_out/manifest_analysis.txt
+fi
+- uses: actions/upload-artifact@v4
+if: always()
+with:
+name: build-data
+path: build_out
+if-no-files-found: warn
 
-  emulator:
-    name: emulator
-    runs-on: ubuntu-latest
-    needs: build
-    if: always()
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: diagnostics-data
-          path: diagnostics_out
-      - uses: actions/download-artifact@v4
-        with:
-          name: build-data
-          path: downloaded_build
-      - name: locate-apk
-        id: locate_apk
-        run: |
-          set -euo pipefail
-          mkdir -p emulator_work
-          found=0
-          while IFS= read -r -d '' a; do
-            if unzip -l "$a" 2>/dev/null | grep -q "lib/x86_64/"; then
-              cp "$a" emulator_work/app.apk || true
-              found=1
-              break
-            fi
-          done < <(find downloaded_build -type f -name "*.apk" -print0 2>/dev/null || true)
-          if [ "$found" -eq 0 ]; then
-            while IFS= read -r -d '' a; do
-              if unzip -l "$a" 2>/dev/null | grep -q "lib/x86/"; then
-                cp "$a" emulator_work/app.apk || true
-                found=1
-                break
-              fi
-            done < <(find downloaded_build -type f -name "*.apk" -print0 2>/dev/null || true)
-          fi
-          if [ "$found" -eq 0 ]; then
-            FIRST=$(find downloaded_build -type f -name "*.apk" -print -quit || true)
-            if [ -n "$FIRST" ]; then
-              cp "$FIRST" emulator_work/app.apk || true
-              found=1
-            fi
-          fi
-          if [ "$found" -eq 1 ]; then
-            echo "apk_path=emulator_work/app.apk" >> $GITHUB_OUTPUT
-            echo "apk_exists=true" >> $GITHUB_ENV
-          else
-            echo "apk_exists=false" >> $GITHUB_ENV
-          fi
-      - name: prepare-sdk-and-avd
-        if: env.apk_exists == 'true'
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
-          mkdir -p "$ANDROID_HOME"
-          AVAILABLE_KB=$(df --output=avail -k "$HOME" | tail -n1 || echo 0)
-          if [ "$AVAILABLE_KB" -lt "${MIN_FREE_KB}" ]; then
-            if [ -d /usr/local/lib/android ]; then
-              sudo rm -rf /usr/local/lib/android || true
-            fi
-            if [ -d /usr/share/dotnet ]; then
-              sudo rm -rf /usr/share/dotnet || true
-            fi
-            AVAILABLE_KB=$(df --output=avail -k "$HOME" | tail -n1 || echo 0)
-            if [ "$AVAILABLE_KB" -lt "${MIN_FREE_KB}" ]; then
-              mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
-              echo "NO_SPACE_AVAILABLE" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
-              exit 0
-            fi
-          fi
-          SDKMANAGER_PATH="$(command -v sdkmanager || true)"
-          if [ -z "$SDKMANAGER_PATH" ]; then
-            SDKMANAGER_PATH="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit || true)"
-          fi
-          if [ -z "$SDKMANAGER_PATH" ]; then
-            if [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
-              SDKMANAGER_PATH="$ANDROID_HOME/tools/bin/sdkmanager"
-            fi
-          fi
-          if [ -z "$SDKMANAGER_PATH" ]; then
-            mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
-            echo "SDKMANAGER_NOT_FOUND" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
-            exit 0
-          fi
-          SDKMANAGER_DIR=$(dirname "$SDKMANAGER_PATH")
-          export PATH="$SDKMANAGER_DIR:$PATH"
-          "$SDKMANAGER_PATH" --sdk_root="$ANDROID_HOME" "platform-tools" "emulator" "platforms;android-${API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "system-images;android-${API_LEVEL};${ANDROID_TARGET};${ANDROID_ARCH}"
-          yes | "$SDKMANAGER_PATH" --sdk_root="$ANDROID_HOME" --licenses
-          AVDMANAGER_PATH="$(command -v avdmanager || true)"
-          if [ -z "$AVDMANAGER_PATH" ]; then
-            AVDMANAGER_PATH="$(find "$ANDROID_HOME" -type f -name avdmanager -print -quit || true)"
-          fi
-          if [ -z "$AVDMANAGER_PATH" ]; then
-            mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
-            echo "AVDMANAGER_NOT_FOUND" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
-            exit 0
-          fi
-          echo no | "$AVDMANAGER_PATH" create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};${ANDROID_TARGET};${ANDROID_ARCH}" --device "pixel" --force || true
-          CONFIG_DIR="$HOME/.android/avd/${AVD_NAME}.avd"
-          mkdir -p "$CONFIG_DIR"
-          printf "hw.ramSize=2048\nvm.heapSize=512\nhw.lcd.density=160\nhw.lcd.height=800\nhw.lcd.width=480\nsnapshot.present=false\nimage.sysdir.1=system-images/android-${API_LEVEL}/${ANDROID_TARGET}/${ANDROID_ARCH}/\n" > "$CONFIG_DIR/config.ini"
-      - name: run-emulator-and-test
-        if: env.apk_exists == 'true'
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
-          PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS_VERSION}:$PATH"
-          APK="${{ steps.locate_apk.outputs.apk_path }}"
-          LOGDIR="$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
-          mkdir -p "$LOGDIR"
-          EMU_STDOUT="$LOGDIR/emu_stdout.txt"
-          EMU_STDERR="$LOGDIR/emu_stderr.txt"
-          INSTALL_LOG="$LOGDIR/install_log.txt"
-          LAUNCH_LOG="$LOGDIR/launch_log.txt"
-          LOGCAT="$LOGDIR/full_logcat.txt"
-          MEMLOG="$LOGDIR/memory_monitor.txt"
-          if [ -f diagnostics_out/kvm.txt ]; then
-            KVM_FLAG_CONTENT="$(cat diagnostics_out/kvm.txt | tr -d '\r\n' || true)"
-          else
-            KVM_FLAG_CONTENT="kvm_available=false"
-          fi
-          ACCEL_FLAG="-accel off"
-          if [ -r /dev/kvm ] || [ "$KVM_FLAG_CONTENT" = "kvm_available=true" ]; then
-            ACCEL_FLAG="-accel on"
-            sudo chmod 666 /dev/kvm || true
-          fi
-          adb start-server || true
-          (while true; do date; free -h; ps aux --sort=-%mem | head -n 10; sleep 60; done) > "$MEMLOG" 2>&1 &
-          MEM_PID=$!
-          EMU_CMD=(emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect $ACCEL_FLAG -no-snapshot -no-snapshot-save -camera-back none -cache-size 1024)
-          if command -v setsid >/dev/null 2>&1; then
-            setsid "${EMU_CMD[@]}" >"$EMU_STDOUT" 2>"$EMU_STDERR" < /dev/null &
-            EMU_PID=$!
-            EMU_PGID=$(ps -o pgid= "$EMU_PID" | tr -d ' ' || echo "$EMU_PID")
-          else
-            nohup "${EMU_CMD[@]}" >"$EMU_STDOUT" 2>"$EMU_STDERR" &
-            EMU_PID=$!
-            EMU_PGID=$(ps -o pgid= "$EMU_PID" | tr -d ' ' || echo "$EMU_PID")
-          fi
-          cleanup() {
-            if [ -n "${EMU_PGID:-}" ] && kill -0 "${EMU_PGID}" 2>/dev/null; then
-              kill -TERM -"${EMU_PGID}" 2>/dev/null || true
-            elif [ -n "${EMU_PID:-}" ] && kill -0 "${EMU_PID}" 2>/dev/null; then
-              kill -TERM "${EMU_PID}" 2>/dev/null || true
-            fi
-            if [ -n "${MEM_PID:-}" ] && kill -0 "${MEM_PID}" 2>/dev/null; then
-              kill -9 "${MEM_PID}" 2>/dev/null || true
-            fi
-          }
-          trap 'cleanup' EXIT
-          START_TS=$(date +%s)
-          FOUND_SERIAL=""
-          TIMEOUT=${EMU_BOOT_TIMEOUT_SEC}
-          EARLY_TIMEOUT=300
-          EARLY_END=$((START_TS + EARLY_TIMEOUT))
-          while [ $(( $(date +%s) - START_TS )) -lt $TIMEOUT ]; do
-            adb devices -l > "$LOGDIR/adb_devices.txt" 2>&1 || true
-            SERIAL=$(awk '/emulator-/{print $1; exit}' "$LOGDIR/adb_devices.txt" || true)
-            if [ -n "$SERIAL" ]; then
-              STATE=$(awk -v s="$SERIAL" '$1==s{print $2}' "$LOGDIR/adb_devices.txt" || true)
-              if [ "$STATE" = "device" ]; then
-                FOUND_SERIAL="$SERIAL"
-                break
-              fi
-            fi
-            if ! kill -0 $EMU_PID 2>/dev/null; then
-              echo "PROCESS_DIED" > "$LOGDIR/boot_error.txt"
-              break
-            fi
-            if [ $(date +%s) -gt $EARLY_END ] && [ -z "$SERIAL" ]; then
-              echo "NO_SERIAL_AFTER_EARLY_TIMEOUT" > "$LOGDIR/boot_error.txt"
-              break
-            fi
-            sleep 5
-          done
-          if [ -z "$FOUND_SERIAL" ]; then
-            adb devices -l > "$LOGDIR/adb_devices_final.txt" 2>&1 || true
-            if [ ! -f "$LOGDIR/boot_error.txt" ]; then
-              echo "EMULATOR_SERIAL_NOT_READY" > "$LOGDIR/boot_error.txt"
-            fi
-            cleanup
-            ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
-            echo "$LOGDIR"
-            exit 0
-          fi
-          adb -s "$FOUND_SERIAL" wait-for-device || true
-          BOOT_OK=0
-          for i in $(seq 1 ${EMU_WAIT_FOR_DEVICE_SEC}); do
-            bc=$(adb -s "$FOUND_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-            if [ "$bc" = "1" ]; then
-              BOOT_OK=1
-              break
-            fi
-            sleep 1
-          done
-          if [ $BOOT_OK -ne 1 ]; then
-            adb -s "$FOUND_SERIAL" logcat -d > "$LOGDIR/logcat_preboot.txt" || true
-            echo "EMULATOR_BOOT_TIMEOUT" > "$LOGDIR/boot_error.txt"
-            adb -s "$FOUND_SERIAL" emu kill || true
-            cleanup
-            ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
-            echo "$LOGDIR"
-            exit 0
-          fi
-          adb -s "$FOUND_SERIAL" logcat -c || true
-          if timeout 120s adb -s "$FOUND_SERIAL" install -r "$APK" > "$INSTALL_LOG" 2>&1; then
-            :
-          else
-            echo "INSTALL_FAILED" > "$LOGDIR/install_error.txt"
-          fi
-          AAPT2_PATH="$(find $ANDROID_HOME/build-tools -name aapt2 -print -quit || true)"
-          AAPT_PATH="$(find $ANDROID_HOME/build-tools -name aapt -print -quit || true)"
-          PKG=""
-          MAINACT=""
-          if [ -n "$AAPT2_PATH" ]; then
-            PKG=$("$AAPT2_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' | head -n1 || true)
-            MAINACT=$("$AAPT2_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' | head -n1 || true)
-          elif [ -n "$AAPT_PATH" ]; then
-            PKG=$("$AAPT_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' | head -n1 || true)
-            MAINACT=$("$AAPT_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' | head -n1 || true)
-          else
-            echo "AAPT_NOT_FOUND" > "$LOGDIR/parse_error.txt"
-            PKG=""
-            MAINACT=""
-          fi
-          if [ -n "$PKG" ]; then
-            if [ -n "$MAINACT" ]; then
-              adb -s "$FOUND_SERIAL" shell am start -n "$PKG/$MAINACT" > "$LAUNCH_LOG" 2>&1 || true
-            else
-              adb -s "$FOUND_SERIAL" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > "$LAUNCH_LOG" 2>&1 || true
-            fi
-            APP_OK=0
-            for j in $(seq 1 30); do
-              PID=$(adb -s "$FOUND_SERIAL" shell pidof "$PKG" 2>/dev/null | tr -d '\r\n' || echo "")
-              if [ -n "$PID" ]; then
-                APP_OK=1
-                break
-              fi
-              sleep 1
-            done
-            adb -s "$FOUND_SERIAL" logcat -d > "$LOGCAT" || true
-            grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError" "$LOGCAT" > "$LOGDIR/runtime_crashes.txt" || echo "NO_CRASHES_DETECTED" > "$LOGDIR/runtime_crashes.txt"
-          else
-            if [ ! -f "$LOGDIR/parse_error.txt" ]; then
-              echo "PKG_NOT_DETECTED" > "$LOGDIR/parse_error.txt"
-            fi
-          fi
-          adb -s "$FOUND_SERIAL" emu kill || true
-          cleanup
-          ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
-          echo "$LOGDIR"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: emulator-data
-          path: emulator_logs_*/**
-          if-no-files-found: warn
+emulator:
+name: emulator
+runs-on: ubuntu-latest
+needs: build
+if: always()
+timeout-minutes: 150
+steps:
+- uses: actions/checkout@v4
+- uses: actions/setup-java@v4
+with:
+distribution: temurin
+java-version: ${{ env.JAVA_VERSION }}
+- uses: actions/download-artifact@v4
+with:
+name: diagnostics-data
+path: diagnostics_out
+- uses: actions/download-artifact@v4
+with:
+name: build-data
+path: downloaded_build
+- name: locate-apk
+id: locate_apk
+run: |
+set -euo pipefail
+mkdir -p emulator_work
+found=0
+while IFS= read -r -d '' a; do
+if unzip -l "$a" 2>/dev/null | grep -q "lib/x86_64/"; then
+cp "$a" emulator_work/app.apk || true
+found=1
+break
+fi
+done < <(find downloaded_build -type f -name ".apk" -print0 2>/dev/null || true)
+if [ "$found" -eq 0 ]; then
+while IFS= read -r -d '' a; do
+if unzip -l "$a" 2>/dev/null | grep -q "lib/x86/"; then
+cp "$a" emulator_work/app.apk || true
+found=1
+break
+fi
+done < <(find downloaded_build -type f -name ".apk" -print0 2>/dev/null || true)
+fi
+if [ "$found" -eq 0 ]; then
+FIRST=$(find downloaded_build -type f -name ".apk" -print -quit || true)
+if [ -n "$FIRST" ]; then
+cp "$FIRST" emulator_work/app.apk || true
+found=1
+fi
+fi
+if [ "$found" -eq 1 ]; then
+echo "apk_path=emulator_work/app.apk" >> $GITHUB_OUTPUT
+echo "apk_exists=true" >> $GITHUB_ENV
+else
+echo "apk_exists=false" >> $GITHUB_ENV
+fi
+- name: prepare-sdk-and-avd
+if: env.apk_exists == 'true'
+run: |
+set -euo pipefail
+export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+mkdir -p "$ANDROID_HOME"
+AVAILABLE_KB=$(df --output=avail -k "$HOME" | tail -n1 || echo 0)
+if [ "$AVAILABLE_KB" -lt "${MIN_FREE_KB}" ]; then
+if [ -d /usr/local/lib/android ]; then
+sudo rm -rf /usr/local/lib/android || true
+fi
+if [ -d /usr/share/dotnet ]; then
+sudo rm -rf /usr/share/dotnet || true
+fi
+AVAILABLE_KB=$(df --output=avail -k "$HOME" | tail -n1 || echo 0)
+if [ "$AVAILABLE_KB" -lt "${MIN_FREE_KB}" ]; then
+mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
+echo "NO_SPACE_AVAILABLE" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
+exit 0
+fi
+fi
+SDKMANAGER_PATH="$(command -v sdkmanager || true)"
+if [ -z "$SDKMANAGER_PATH" ]; then
+SDKMANAGER_PATH="$(find "$ANDROID_HOME" -type f -name sdkmanager -print -quit || true)"
+fi
+if [ -z "$SDKMANAGER_PATH" ]; then
+if [ -x "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+SDKMANAGER_PATH="$ANDROID_HOME/tools/bin/sdkmanager"
+fi
+fi
+if [ -z "$SDKMANAGER_PATH" ]; then
+mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
+echo "SDKMANAGER_NOT_FOUND" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
+exit 0
+fi
+SDKMANAGER_DIR=$(dirname "$SDKMANAGER_PATH")
+export PATH="$SDKMANAGER_DIR:$PATH"
+"$SDKMANAGER_PATH" --sdk_root="$ANDROID_HOME" "platform-tools" "emulator" "platforms;android-${API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "system-images;android-${API_LEVEL};${ANDROID_TARGET};${ANDROID_ARCH}"
+yes | "$SDKMANAGER_PATH" --sdk_root="$ANDROID_HOME" --licenses || true
+AVDMANAGER_PATH="$(command -v avdmanager || true)"
+if [ -z "$AVDMANAGER_PATH" ]; then
+AVDMANAGER_PATH="$(find "$ANDROID_HOME" -type f -name avdmanager -print -quit || true)"
+fi
+if [ -z "$AVDMANAGER_PATH" ]; then
+mkdir -p "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
+echo "AVDMANAGER_NOT_FOUND" > "$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}/boot_error.txt"
+exit 0
+fi
+echo no | "$AVDMANAGER_PATH" create avd -n "${AVD_NAME}" -k "system-images;android-${API_LEVEL};${ANDROID_TARGET};${ANDROID_ARCH}" --device "pixel" --force || true
+CONFIG_DIR="$HOME/.android/avd/${AVD_NAME}.avd"
+mkdir -p "$CONFIG_DIR"
+printf "hw.ramSize=2048\nvm.heapSize=512\nhw.lcd.density=160\nhw.lcd.height=800\nhw.lcd.width=480\nsnapshot.present=false\nimage.sysdir.1=system-images/android-${API_LEVEL}/${ANDROID_TARGET}/${ANDROID_ARCH}/\n" > "$CONFIG_DIR/config.ini"
+- name: run-emulator-and-test
+if: env.apk_exists == 'true'
+continue-on-error: true
+run: |
+set -euo pipefail
+export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS_VERSION}:$PATH"
+APK="${{ steps.locate_apk.outputs.apk_path }}"
+LOGDIR="$GITHUB_WORKSPACE/emulator_logs_${{ github.run_id }}"
+mkdir -p "$LOGDIR"
+EMU_STDOUT="$LOGDIR/emu_stdout.txt"
+EMU_STDERR="$LOGDIR/emu_stderr.txt"
+INSTALL_LOG="$LOGDIR/install_log.txt"
+LAUNCH_LOG="$LOGDIR/launch_log.txt"
+LOGCAT="$LOGDIR/full_logcat.txt"
+MEMLOG="$LOGDIR/memory_monitor.txt"
+if [ -f diagnostics_out/kvm.txt ]; then
+KVM_FLAG_CONTENT="$(cat diagnostics_out/kvm.txt | tr -d '\r\n' || true)"
+else
+KVM_FLAG_CONTENT="kvm_available=false"
+fi
+ACCEL_FLAG="-accel off"
+if [ -r /dev/kvm ] || [ "$KVM_FLAG_CONTENT" = "kvm_available=true" ]; then
+ACCEL_FLAG="-accel on"
+sudo chmod 666 /dev/kvm || true
+fi
+adb start-server || true
+(while true; do date; free -h; ps aux --sort=-%mem | head -n 10; sleep 60; done) > "$MEMLOG" 2>&1 &
+MEM_PID=$!
+EMU_CMD=(emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect $ACCEL_FLAG -no-snapshot -no-snapshot-save -camera-back none -cache-size 1024)
+if command -v setsid >/dev/null 2>&1; then
+setsid "${EMU_CMD[@]}" >"$EMU_STDOUT" 2>"$EMU_STDERR" < /dev/null &
+EMU_PID=$!
+EMU_PGID=$(ps -o pgid= "$EMU_PID" | tr -d ' ' || echo "$EMU_PID")
+else
+nohup "${EMU_CMD[@]}" >"$EMU_STDOUT" 2>"$EMU_STDERR" &
+EMU_PID=$!
+EMU_PGID=$(ps -o pgid= "$EMU_PID" | tr -d ' ' || echo "$EMU_PID")
+fi
+cleanup() {
+if [ -n "${EMU_PGID:-}" ] && kill -0 "${EMU_PGID}" 2>/dev/null; then
+kill -TERM -"${EMU_PGID}" 2>/dev/null || true
+elif [ -n "${EMU_PID:-}" ] && kill -0 "${EMU_PID}" 2>/dev/null; then
+kill -TERM "${EMU_PID}" 2>/dev/null || true
+fi
+if [ -n "${MEM_PID:-}" ] && kill -0 "${MEM_PID}" 2>/dev/null; then
+kill -9 "${MEM_PID}" 2>/dev/null || true
+fi
+}
+trap 'cleanup' EXIT
+START_TS=$(date +%s)
+FOUND_SERIAL=""
+TIMEOUT=${EMU_BOOT_TIMEOUT_SEC}
+EARLY_TIMEOUT=300
+EARLY_END=$((START_TS + EARLY_TIMEOUT))
+while [ $(( $(date +%s) - START_TS )) -lt $TIMEOUT ]; do
+adb devices -l > "$LOGDIR/adb_devices.txt" 2>&1 || true
+SERIAL=$(awk '/emulator-/{print $1; exit}' "$LOGDIR/adb_devices.txt" || true)
+if [ -n "$SERIAL" ]; then
+STATE=$(awk -v s="$SERIAL" '$1==s{print $2}' "$LOGDIR/adb_devices.txt" || true)
+if [ "$STATE" = "device" ]; then
+FOUND_SERIAL="$SERIAL"
+break
+fi
+fi
+if ! kill -0 $EMU_PID 2>/dev/null; then
+echo "PROCESS_DIED" > "$LOGDIR/boot_error.txt"
+break
+fi
+if [ $(date +%s) -gt $EARLY_END ] && [ -z "$SERIAL" ]; then
+echo "NO_SERIAL_AFTER_EARLY_TIMEOUT" > "$LOGDIR/boot_error.txt"
+break
+fi
+sleep 5
+done
+if [ -z "$FOUND_SERIAL" ]; then
+adb devices -l > "$LOGDIR/adb_devices_final.txt" 2>&1 || true
+if [ ! -f "$LOGDIR/boot_error.txt" ]; then
+echo "EMULATOR_SERIAL_NOT_READY" > "$LOGDIR/boot_error.txt"
+fi
+cleanup
+ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
+echo "$LOGDIR"
+exit 0
+fi
+adb -s "$FOUND_SERIAL" wait-for-device || true
+BOOT_OK=0
+for i in $(seq 1 ${EMU_WAIT_FOR_DEVICE_SEC}); do
+bc=$(adb -s "$FOUND_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
+if [ "$bc" = "1" ]; then
+BOOT_OK=1
+break
+fi
+sleep 1
+done
+if [ $BOOT_OK -ne 1 ]; then
+adb -s "$FOUND_SERIAL" logcat -d > "$LOGDIR/logcat_preboot.txt" || true
+echo "EMULATOR_BOOT_TIMEOUT" > "$LOGDIR/boot_error.txt"
+adb -s "$FOUND_SERIAL" emu kill || true
+cleanup
+ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
+echo "$LOGDIR"
+exit 0
+fi
+adb -s "$FOUND_SERIAL" logcat -c || true
+if timeout 120s adb -s "$FOUND_SERIAL" install -r "$APK" > "$INSTALL_LOG" 2>&1; then
+:
+else
+echo "INSTALL_FAILED" > "$LOGDIR/install_error.txt"
+fi
+AAPT2_PATH="$(find $ANDROID_HOME/build-tools -name aapt2 -print -quit || true)"
+AAPT_PATH="$(find $ANDROID_HOME/build-tools -name aapt -print -quit || true)"
+PKG=""
+MAINACT=""
+if [ -n "$AAPT2_PATH" ]; then
+PKG=$("$AAPT2_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' | head -n1 || true)
+MAINACT=$("$AAPT2_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' | head -n1 || true)
+elif [ -n "$AAPT_PATH" ]; then
+PKG=$("$AAPT_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/package: name=/{print $2}' | head -n1 || true)
+MAINACT=$("$AAPT_PATH" dump badging "$APK" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2}' | head -n1 || true)
+else
+echo "AAPT_NOT_FOUND" > "$LOGDIR/parse_error.txt"
+PKG=""
+MAINACT=""
+fi
+if [ -n "$PKG" ]; then
+if [ -n "$MAINACT" ]; then
+adb -s "$FOUND_SERIAL" shell am start -n "$PKG/$MAINACT" > "$LAUNCH_LOG" 2>&1 || true
+else
+adb -s "$FOUND_SERIAL" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 > "$LAUNCH_LOG" 2>&1 || true
+fi
+APP_OK=0
+for j in $(seq 1 30); do
+PID=$(adb -s "$FOUND_SERIAL" shell pidof "$PKG" 2>/dev/null | tr -d '\r\n' || echo "")
+if [ -n "$PID" ]; then
+APP_OK=1
+break
+fi
+sleep 1
+done
+adb -s "$FOUND_SERIAL" logcat -d > "$LOGCAT" || true
+grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR|SIGSEGV|UnsatisfiedLinkError|NoClassDefFoundError" "$LOGCAT" > "$LOGDIR/runtime_crashes.txt" || echo "NO_CRASHES_DETECTED" > "$LOGDIR/runtime_crashes.txt"
+else
+if [ ! -f "$LOGDIR/parse_error.txt" ]; then
+echo "PKG_NOT_DETECTED" > "$LOGDIR/parse_error.txt"
+fi
+fi
+adb -s "$FOUND_SERIAL" emu kill || true
+cleanup
+ls -la "$LOGDIR" > "$LOGDIR/ls.txt" 2>&1 || true
+echo "$LOGDIR"
+- uses: actions/upload-artifact@v4
+if: always()
+with:
+name: emulator-data
+path: emulator_logs_/**
+if-no-files-found: warn
 
-  report:
-    name: final-report
-    runs-on: ubuntu-latest
-    needs: [diagnostics, build, emulator]
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          path: artifacts
-      - name: generate-strict-report
-        run: |
-          OUT="FULL_STRICT_REPORT.txt"
-          touch "$OUT"
-          echo "=== STRICT CI REPORT ===" >> "$OUT"
-          echo "Timestamp: $(date)" >> "$OUT"
-          echo "Run ID: ${{ github.run_id }}" >> "$OUT"
-          echo "========================" >> "$OUT"
-          echo "" >> "$OUT"
-          echo "[SECTION: CRITICAL FAILURES]" >> "$OUT"
-          if find artifacts -type f -name "boot_error.txt" -print -quit | grep -q .; then
-             echo "CRITICAL: EMULATOR BOOT FAILED" >> "$OUT"
-             find artifacts -type f -name "boot_error.txt" -exec cat {} + >> "$OUT"
-          fi
-          if find artifacts -type f -name "install_error.txt" -print -quit | grep -q .; then
-             echo "CRITICAL: APK INSTALLATION FAILED" >> "$OUT"
-             find artifacts -type f -name "install_error.txt" -exec cat {} + >> "$OUT"
-          fi
-          if find artifacts -type f -name "parse_error.txt" -print -quit | grep -q .; then
-             echo "CRITICAL: PARSE/AAPT ERRORS" >> "$OUT"
-             find artifacts -type f -name "parse_error.txt" -exec cat {} + >> "$OUT"
-          fi
-          if find artifacts -type f -name "runtime_crashes.txt" -exec grep -v "NO_CRASHES_DETECTED" {} + | grep -q .; then
-             echo "CRITICAL: RUNTIME CRASH DETECTED" >> "$OUT"
-             find artifacts -type f -name "runtime_crashes.txt" -exec cat {} + >> "$OUT"
-          else
-             echo "No Runtime Crashes Detected." >> "$OUT"
-          fi
-          echo "" >> "$OUT"
-          echo "[SECTION: BUILD & TEST ERRORS]" >> "$OUT"
-          find artifacts -type f -name "build-*-assemble.txt" -exec grep -E "FAILURE|FAILED|Error:" {} + >> "$OUT" || true
-          find artifacts -type f -name "diagnostics-*-unit-*.txt" -exec grep -E "FAILED|FAILURE" {} + >> "$OUT" || true
-          echo "" >> "$OUT"
-          echo "[SECTION: LINT ISSUES (Top 100)]" >> "$OUT"
-          find artifacts -type f -name "diagnostics-*-lint.txt" -exec grep -E "Error|Warning" {} + | head -n 100 >> "$OUT" || true
-          echo "" >> "$OUT"
-          echo "[SECTION: APK STRUCTURE]" >> "$OUT"
-          find artifacts -type f -name "native_libs_structure.txt" -exec cat {} + >> "$OUT" || true
-          echo "" >> "$OUT"
-          echo "[SECTION: EMULATOR DEBUG LOGS]" >> "$OUT"
-          find artifacts -type f -name "emu_stderr.txt" -exec tail -n 50 {} + >> "$OUT" || true
-          echo "[SECTION: MEMORY USAGE]" >> "$OUT"
-          find artifacts -type f -name "memory_monitor.txt" -exec tail -n 10 {} + >> "$OUT" || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: FINAL_REPORT
-          path: FULL_STRICT_REPORT.txt
+report:
+name: final-report
+runs-on: ubuntu-latest
+needs: [diagnostics, build, emulator]
+if: always()
+steps:
+- uses: actions/checkout@v4
+- uses: actions/download-artifact@v4
+continue-on-error: true
+with:
+path: artifacts
+- name: generate-strict-report
+run: |
+OUT="FULL_STRICT_REPORT.txt"
+touch "$OUT"
+echo "=== STRICT CI REPORT ===" >> "$OUT"
+echo "Timestamp: $(date)" >> "$OUT"
+echo "Run ID: ${{ github.run_id }}" >> "$OUT"
+echo "========================" >> "$OUT"
+echo "" >> "$OUT"
+echo "[SECTION: CRITICAL FAILURES]" >> "$OUT"
+if find artifacts -type f -name "boot_error.txt" -print -quit | grep -q .; then
+echo "CRITICAL: EMULATOR BOOT FAILED" >> "$OUT"
+find artifacts -type f -name "boot_error.txt" -exec cat {} + >> "$OUT"
+fi
+if find artifacts -type f -name "install_error.txt" -print -quit | grep -q .; then
+echo "CRITICAL: APK INSTALLATION FAILED" >> "$OUT"
+find artifacts -type f -name "install_error.txt" -exec cat {} + >> "$OUT"
+fi
+if find artifacts -type f -name "parse_error.txt" -print -quit | grep -q .; then
+echo "CRITICAL: PARSE/AAPT ERRORS" >> "$OUT"
+find artifacts -type f -name "parse_error.txt" -exec cat {} + >> "$OUT"
+fi
+if find artifacts -type f -name "runtime_crashes.txt" -exec grep -v "NO_CRASHES_DETECTED" {} + | grep -q .; then
+echo "CRITICAL: RUNTIME CRASH DETECTED" >> "$OUT"
+find artifacts -type f -name "runtime_crashes.txt" -exec cat {} + >> "$OUT"
+else
+echo "No Runtime Crashes Detected." >> "$OUT"
+fi
+echo "" >> "$OUT"
+echo "[SECTION: BUILD & TEST ERRORS]" >> "$OUT"
+find artifacts -type f -name "build--assemble.txt" -exec grep -E "FAILURE|FAILED|Error:" {} + >> "$OUT" || true
+find artifacts -type f -name "diagnostics--unit-.txt" -exec grep -E "FAILED|FAILURE" {} + >> "$OUT" || true
+echo "" >> "$OUT"
+echo "[SECTION: LINT ISSUES (Top 100)]" >> "$OUT"
+find artifacts -type f -name "diagnostics--lint.txt" -exec grep -E "Error|Warning" {} + | head -n 100 >> "$OUT" || true
+echo "" >> "$OUT"
+echo "[SECTION: APK STRUCTURE]" >> "$OUT"
+find artifacts -type f -name "native_libs_structure.txt" -exec cat {} + >> "$OUT" || true
+echo "" >> "$OUT"
+echo "[SECTION: EMULATOR DEBUG LOGS]" >> "$OUT"
+find artifacts -type f -name "emu_stderr.txt" -exec tail -n 50 {} + >> "$OUT" || true
+echo "[SECTION: MEMORY USAGE]" >> "$OUT"
+find artifacts -type f -name "memory_monitor.txt" -exec tail -n 10 {} + >> "$OUT" || true
+- uses: actions/upload-artifact@v4
+with:
+name: FINAL_REPORT
+path: FULL_STRICT_REPORT.txt
