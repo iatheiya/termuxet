@@ -100,7 +100,7 @@ jobs:
           mkdir -p build_out
           RUNID=${{ github.run_id }}
           OUT="build_out/build-${RUNID}-assemble.txt"
-          ./gradlew clean assembleRelease --stacktrace 2>&1 | tee "$OUT" || true
+          ./gradlew clean assembleRelease -PciArch=${{ env.ANDROID_ARCH }} --stacktrace 2>&1 | tee "$OUT" || true
       - name: find-and-collect-apks
         id: find_apk
         run: |
@@ -346,7 +346,7 @@ jobs:
           fi
           SWAP_CREATED=0
           if ! swapon --show | grep -q "^/swapfile"; then
-            if sudo sh -c 'fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile'; then
+            if sudo sh -c 'fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && sysctl -w vm.swappiness=100'; then
               SWAP_CREATED=1
             else
               SWAP_CREATED=0
@@ -453,7 +453,7 @@ jobs:
             exit 0
           fi
           adb -s "$FOUND_SERIAL" logcat -c || true
-          if timeout 120s adb -s "$FOUND_SERIAL" install -r "$APK" > "$INSTALL_LOG" 2>&1; then
+          if timeout 300s adb -s "$FOUND_SERIAL" install -r "$APK" > "$INSTALL_LOG" 2>&1; then
             :
           else
             echo "INSTALL_FAILED" > "$LOGDIR/install_error.txt"
