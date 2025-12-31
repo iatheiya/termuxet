@@ -7,7 +7,7 @@ on:
     branches: [master, main]
   workflow_dispatch:
 
-#concurrency:
+#oncurrency:
   #group: ${{ github.workflow }}-${{ github.ref }}
   #cancel-in-progress: true
 
@@ -254,17 +254,7 @@ jobs:
             adb devices -l > emulator_logs/adb_devices_before.txt || true
             adb wait-for-device
             timeout 300s adb install -r "$APK_PATH" > emulator_logs/install_log.txt 2>&1 || true
-            AAPT2=$(command -v aapt2 || true)
-            AAPT=$(command -v aapt || true)
-            PKG=""
-            MAINACT=""
-            if [ -n "$AAPT2" ]; then
-              PKG=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true)
-              MAINACT=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true)
-            elif [ -n "$AAPT" ]; then
-              PKG=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true)
-              MAINACT=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true)
-            fi
+            AAPT2=$(command -v aapt2 || true); AAPT=$(command -v aapt || true); PKG=""; MAINACT=""; if [ -n "$AAPT2" ]; then PKG=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true); MAINACT=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true); elif [ -n "$AAPT" ]; then PKG=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true); MAINACT=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true); fi
             echo "PKG=${PKG}" > emulator_logs/pkg.txt
             if [ -n "$PKG" ]; then
               if [ -n "$MAINACT" ]; then
