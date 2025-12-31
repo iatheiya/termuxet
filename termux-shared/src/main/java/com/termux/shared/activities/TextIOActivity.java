@@ -235,6 +235,7 @@ public class TextIOActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         confirm();
+        super.onBackPressed();
     }
 
     /** Confirm current text and send it back to calling {@link Activity}. */
