@@ -8,26 +8,15 @@ on:
   workflow_dispatch:
 
 env:
-  # == CORE SETTINGS ==
   JAVA_VERSION: '17'
-  # Используем API 30 (Android 11) и образ aosp_atd (Automated Test Device).
-  # Это самый легковесный образ, из которого вырезано всё лишнее (UI, GMS),
-  # что критично для стабильности на 7GB RAM.
   API_LEVEL: '30'
   ANDROID_TARGET: 'aosp_atd'
   ANDROID_ARCH: 'x86_64'
   AVD_NAME: 'ci_optimized'
-  EMU_BOOT_TIMEOUT_SEC: '600' # 10 минут на загрузку
-  
-  # == MEMORY SAFETY ==
-  # Ограничиваем Heap Gradle, чтобы он не съел память эмулятора.
-  # Отключаем демона, чтобы процесс умирал сразу после работы.
+  EMU_BOOT_TIMEOUT_SEC: '600'
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2560m -XX:+UseParallelGC"
 
 jobs:
-  # -----------------------------------------------------------------
-  # JOB 1: DIAGNOSTICS & UNIT TESTS
-  # -----------------------------------------------------------------
   diagnostics:
     name: diagnostics
     runs-on: ubuntu-latest
@@ -39,45 +28,48 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
-      
       - run: chmod +x ./gradlew
-
-      # Проверка доступности KVM (аппаратное ускорение)
       - name: check-kvm
         run: |
           echo "Checking KVM..."
-          if [ -r /dev/kvm ]; then echo "KVM is available"; else echo "KVM NOT available"; exit 1; fi
-
+          if [ -r /dev/kvm ]; then
+            echo "KVM is available"
+            echo "kvm_available=true" >> $GITHUB_ENV
+          else
+            echo "KVM NOT available"
+            echo "kvm_available=false" >> $GITHUB_ENV
+          fi
+          echo "=== /proc/cpuinfo ===" > diagnostics_kvm.txt
+          cat /proc/cpuinfo >> diagnostics_kvm.txt 2>/dev/null || true
+          echo "=== lsmod | grep kvm ===" >> diagnostics_kvm.txt
+          lsmod | grep kvm >> diagnostics_kvm.txt 2>/dev/null || true
+          echo "=== dmesg last lines ===" >> diagnostics_kvm.txt
+          dmesg | tail -n 50 >> diagnostics_kvm.txt 2>/dev/null || true
       - name: unit-tests-debug
         continue-on-error: true
         run: |
           RUNID=${{ github.run_id }}
           OUT="diagnostics-${RUNID}-unit-debug.txt"
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee "$OUT" || true
-
       - name: lint-check
         continue-on-error: true
         run: |
           RUNID=${{ github.run_id }}
           OUT="diagnostics-${RUNID}-lint.txt"
           ./gradlew lint --stacktrace 2>&1 | tee "$OUT" || true
-
       - name: collect-diagnostics
         if: always()
         run: |
           mkdir -p diagnostics_out
           mv diagnostics-*.txt diagnostics_out/ 2>/dev/null || true
+          mv diagnostics_kvm.txt diagnostics_out/ 2>/dev/null || true
           if [ -d "app/build/reports" ]; then cp -r app/build/reports diagnostics_out/reports; fi
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: diagnostics-data
           path: diagnostics_out
 
-  # -----------------------------------------------------------------
-  # JOB 2: BUILD APK
-  # -----------------------------------------------------------------
   build:
     name: build
     runs-on: ubuntu-latest
@@ -95,28 +87,22 @@ jobs:
         with:
           cmdline-tools-version: 11076708
       - run: chmod +x ./gradlew
-
       - name: prepare-keystore
         run: |
           if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
           else
-            echo "Generating ephemeral keystore..."
             keytool -genkeypair -v -keystore release.keystore -alias ci_release -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CI,OU=CI,O=CI,L=CI,ST=CI,C=US"
           fi
-
       - name: assemble-release
         continue-on-error: true
         run: |
           RUNID=${{ github.run_id }}
           OUT="build-${RUNID}-assemble.txt"
-          # Используем clean для чистоты эксперимента
           ./gradlew clean assembleRelease --stacktrace 2>&1 | tee "$OUT" || true
-
       - name: find-apk
         id: find_apk
         run: |
-          # Ищем APK, исключая unaligned версии
           APK="$(find app/build/outputs/apk -type f -name "*.apk" ! -name "*-unaligned.apk" | head -n 1 || true)"
           if [ -n "$APK" ]; then
             echo "apk_path=$APK" >> $GITHUB_OUTPUT
@@ -126,41 +112,32 @@ jobs:
             echo "apk_exists=false" >> $GITHUB_ENV
             echo "No APK found."
           fi
-
-      # Анализ нативных библиотек (важно для архитектуры)
       - name: analyze-native-libs
         if: env.apk_exists == 'true'
         run: |
           APK="${{ steps.find_apk.outputs.apk_path }}"
-          echo "Analyzing libs in $APK..."
+          mkdir -p build_out
           unzip -l "$APK" | grep "lib/" > native_libs_structure.txt || echo "NO_NATIVE_LIBS" > native_libs_structure.txt
-
-      # Анализ манифеста (проверка разрешений и активити)
+          mv native_libs_structure.txt build_out/ || true
       - name: analyze-manifest
         if: always()
         run: |
-          # Ищем манифест даже если сборка упала, может он сгенерировался частично
           find app/build -name "AndroidManifest.xml" -print0 | xargs -0 grep -E "exported|permission|activity" > manifest_analysis.txt || echo "Manifest not found" > manifest_analysis.txt
-
+          mkdir -p build_out
+          mv manifest_analysis.txt build_out/ || true
       - name: collect-build-logs
         if: always()
         run: |
           mkdir -p build_out
           mv build-*.txt build_out/ 2>/dev/null || true
-          mv native_libs_structure.txt build_out/ 2>/dev/null || true
-          mv manifest_analysis.txt build_out/ 2>/dev/null || true
-          # Сохраняем сам APK
+          mv build_out build_out || true
           find app/build/outputs/apk -name "*.apk" -exec cp {} build_out/ \; 2>/dev/null || true
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: build-data
           path: build_out
 
-  # -----------------------------------------------------------------
-  # JOB 3: EMULATOR TEST (THE HARD PART)
-  # -----------------------------------------------------------------
   emulator:
     name: emulator
     runs-on: ubuntu-latest
@@ -173,17 +150,13 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-      
-      # Настраиваем SDK вручную, чтобы точно знать версии
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-
       - uses: actions/download-artifact@v4
         with:
           name: build-data
           path: downloaded_apk
-
       - name: identify-apk
         id: find_apk
         run: |
@@ -194,170 +167,129 @@ jobs:
           else
             echo "apk_exists=false" >> $GITHUB_ENV
           fi
-
       - name: setup-avd-optimized
         if: env.apk_exists == 'true'
         run: |
-          # Устанавливаем и принимаем лицензии
-          echo "y" | sdkmanager "platform-tools" "emulator" "system-images;android-${{ env.API_LEVEL }};${{ env.ANDROID_TARGET }};${{ env.ANDROID_ARCH }}"
-          
-          # Создаем AVD
-          echo "no" | avdmanager create avd -n "${AVD_NAME}" -k "system-images;android-${{ env.API_LEVEL }};${{ env.ANDROID_TARGET }};${{ env.ANDROID_ARCH }}" --force
-
-          # == HARDCORE OPTIMIZATION CONFIG ==
-          CONFIG_PATH=~/.android/avd/${AVD_NAME}.avd/config.ini
-          
-          # 2GB RAM - золотая середина. Меньше - Android тормозит, Больше - GitHub убивает.
-          echo "hw.ramSize=2048" >> $CONFIG_PATH
-          # Маленький heap внутри Android
-          echo "vm.heapSize=256" >> $CONFIG_PATH
-          # Низкое разрешение (480x800) значительно снижает нагрузку на рендеринг
-          echo "hw.lcd.density=160" >> $CONFIG_PATH
-          echo "hw.lcd.height=800" >> $CONFIG_PATH
-          echo "hw.lcd.width=480" >> $CONFIG_PATH
-          # Отключаем датчики, чтобы не тратить CPU
-          echo "hw.accelerometer=no" >> $CONFIG_PATH
-          echo "hw.audioInput=no" >> $CONFIG_PATH
-          echo "hw.battery=no" >> $CONFIG_PATH
-          echo "hw.gps=no" >> $CONFIG_PATH
-
+          set -euo pipefail
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          mkdir -p "$ANDROID_HOME"
+          mkdir -p "$HOME/.android/avd"
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "emulator" "system-images;android-${{ env.API_LEVEL }};${{ env.ANDROID_TARGET }};${{ env.ANDROID_ARCH }}" || true
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
+          avdmanager create avd -n "${AVD_NAME}" -k "system-images;android-${{ env.API_LEVEL }};${{ env.ANDROID_TARGET }};${{ env.ANDROID_ARCH }}" --device "pixel" --force || true
+          CONFIG_DIR="$HOME/.android/avd/${AVD_NAME}.avd"
+          CONFIG_PATH="$CONFIG_DIR/config.ini"
+          for i in 1 2 3 4 5; do
+            if [ -f "$CONFIG_PATH" ]; then break; fi
+            sleep 2
+          done
+          mkdir -p "$CONFIG_DIR"
+          cat >> "$CONFIG_PATH" <<'EOF'
+hw.ramSize=2048
+vm.heapSize=256
+hw.lcd.density=160
+hw.lcd.height=800
+hw.lcd.width=480
+hw.accelerometer=no
+hw.audioInput=no
+hw.battery=no
+hw.gps=no
+EOF
           echo "AVD Configured. Cat config for debug:"
-          cat $CONFIG_PATH
-
+          cat "$CONFIG_PATH" || true
       - name: run-emulator-and-test
         if: env.apk_exists == 'true'
         continue-on-error: true
         run: |
-          export PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          set -euo pipefail
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           APK="${{ steps.find_apk.outputs.apk_path }}"
           LOGDIR="emulator_logs"
           mkdir -p "$LOGDIR"
-          
-          # Права на KVM
-          sudo chmod 666 /dev/kvm || true
-          
-          # Перезапуск ADB
-          adb kill-server
-          adb start-server
-          
-          # Запуск монитора памяти в фоне (для отладки падений)
+          echo "kvm_available=${{ env.kvm_available }}" > "$LOGDIR/kvm_flag.txt"
+          if [ "${{ env.kvm_available }}" = "true" ] && [ -r /dev/kvm ]; then
+            ACCEL_FLAG="-accel on"
+            sudo chmod 666 /dev/kvm || true
+          else
+            ACCEL_FLAG="-accel off"
+          fi
+          adb kill-server || true
+          adb start-server || true
           (while true; do date; free -h; sleep 60; done) > "$LOGDIR/memory_monitor.txt" &
-          
-          echo "Starting Emulator..."
-          # Флаги запуска:
-          # -no-window: обязательно для CI
-          # -gpu swiftshader_indirect: программный рендеринг, но разгружает процесс эмулятора
-          # -no-snapshot: загрузка с нуля, стабильнее
-          # -noaudio: не нужен звук
-          stdbuf -oL emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel on -no-snapshot -camera-back none > "$LOGDIR/emu_stdout.txt" 2> "$LOGDIR/emu_stderr.txt" &
+          EMU_STDOUT="$LOGDIR/emu_stdout.txt"
+          EMU_STDERR="$LOGDIR/emu_stderr.txt"
+          stdbuf -oL emulator -avd "${AVD_NAME}" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect $ACCEL_FLAG -no-snapshot -camera-back none >"$EMU_STDOUT" 2>"$EMU_STDERR" &
           EMU_PID=$!
-          
           START_TIME=$(date +%s)
-          echo "Emulator PID: $EMU_PID"
-          
           BOOT_SUCCESS=false
-          
-          # Цикл ожидания загрузки
           while true; do
             CURRENT_TIME=$(date +%s)
             ELAPSED=$(( CURRENT_TIME - START_TIME ))
-            
-            # 1. Проверка жив ли процесс
             if ! kill -0 $EMU_PID 2>/dev/null; then
-              echo "CRITICAL: Emulator process died!"
-              echo "PROCESS_DIED" > "$LOGDIR/boot_error.txt"
+              echo "CRITICAL: Emulator process died!" | tee "$LOGDIR/boot_error.txt"
               break
             fi
-            
-            # 2. Проверка статуса загрузки через ADB
-            # Используем timeout, чтобы adb не завис
-            STATUS=$(timeout 5s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            
+            STATUS=$(timeout 5s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
             if [ "$STATUS" = "1" ]; then
               echo "SUCCESS: Boot completed in ${ELAPSED}s"
               BOOT_SUCCESS=true
               break
             fi
-            
-            # 3. Проверка таймаута
             if [ $ELAPSED -ge ${{ env.EMU_BOOT_TIMEOUT_SEC }} ]; then
-              echo "TIMEOUT: Boot time limit exceeded."
-              echo "TIMEOUT" > "$LOGDIR/boot_error.txt"
+              echo "TIMEOUT: Boot time limit exceeded." | tee "$LOGDIR/boot_error.txt"
               break
             fi
-            
-            # Heartbeat каждые 30 сек
             if (( ELAPSED % 30 == 0 )); then
               echo "HEARTBEAT: Waiting... ${ELAPSED}s. ADB State: $(adb get-state 2>/dev/null || echo 'unknown')"
             fi
-            
             sleep 5
           done
-          
           if [ "$BOOT_SUCCESS" = "true" ]; then
-             echo "Stabilizing..."
-             sleep 10
-             adb wait-for-device
-             
-             # Чистим логи перед тестом
-             adb logcat -c
-             
-             echo "Installing APK..."
-             # Увеличиваем таймаут установки
-             if timeout 120s adb install -r "$APK" > "$LOGDIR/install_log.txt" 2>&1; then
-                echo "APK Installed."
-                
-                BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -n 1)
-                AAPT="$BUILD_TOOLS/aapt"
-                
-                PKG=$($AAPT dump badging "$APK" | grep "package: name=" | awk -F"'" '{print $2}')
-                ACT=$($AAPT dump badging "$APK" | grep "launchable-activity: name=" | awk -F"'" '{print $2}')
-                
-                if [ -n "$PKG" ]; then
-                   echo "Launching $PKG..."
-                   
-                   if [ -n "$ACT" ]; then
-                      adb shell am start -n "$PKG/$ACT"
-                   else
-                      # Если нет launchable activity, запускаем Monkey test на пакет
-                      echo "No Main Activity found, running Monkey stress test..."
-                      adb shell monkey -p "$PKG" 1
-                   fi
-                   
-                   echo "Monitoring runtime for 30 seconds..."
-                   sleep 30
-                   
-                   echo "Dumping logcat..."
-                   adb logcat -d > "$LOGDIR/full_logcat.txt"
-                   
-                   # Глубокий поиск ошибок
-                   grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR" "$LOGDIR/full_logcat.txt" > "$LOGDIR/runtime_crashes.txt" || echo "No crashes found in grep."
+            sleep 10
+            adb wait-for-device
+            adb logcat -c || true
+            if timeout 120s adb install -r "$APK" > "$LOGDIR/install_log.txt" 2>&1; then
+              echo "APK Installed."
+              BUILD_TOOLS_DIR="$(ls -d $ANDROID_HOME/build-tools/*/ 2>/dev/null | sort -V | tail -n 1 || true)"
+              AAPT="$BUILD_TOOLS_DIR/aapt"
+              if [ -x "$AAPT" ]; then
+                PKG=$($AAPT dump badging "$APK" | grep "package: name=" | awk -F"'" '{print $2}' || true)
+                ACT=$($AAPT dump badging "$APK" | grep "launchable-activity: name=" | awk -F"'" '{print $2}' || true)
+              else
+                PKG=$(unzip -p "$APK" AndroidManifest.xml 2>/dev/null | strings | head -n 1 || true)
+                ACT=""
+              fi
+              if [ -n "$PKG" ]; then
+                if [ -n "$ACT" ]; then
+                  adb shell am start -n "$PKG/$ACT" || true
                 else
-                   echo "Error: Package name not found in APK." > "$LOGDIR/parse_error.txt"
+                  adb shell monkey -p "$PKG" 1 || true
                 fi
-             else
-                echo "Install Failed."
-                echo "INSTALL_FAILED" > "$LOGDIR/install_error.txt"
-             fi
-             
-             # Аккуратное завершение
-             adb emu kill || kill -9 $EMU_PID 2>/dev/null || true
+                sleep 30
+                adb logcat -d > "$LOGDIR/full_logcat.txt" || true
+                grep -E "FATAL|AndroidRuntime|Exception|Caused by|ANR" "$LOGDIR/full_logcat.txt" > "$LOGDIR/runtime_crashes.txt" || echo "No crashes found in grep." > "$LOGDIR/runtime_crashes.txt"
+              else
+                echo "Error: Package name not found in APK." > "$LOGDIR/parse_error.txt"
+              fi
+            else
+              echo "Install Failed." > "$LOGDIR/install_error.txt"
+            fi
+            adb emu kill || kill -9 $EMU_PID 2>/dev/null || true
           else
-             echo "Boot failed. Collecting stderr..."
-             cp "$LOGDIR/emu_stderr.txt" "$LOGDIR/boot_failure_log.txt"
-             # Принудительное убийство
-             kill -9 $EMU_PID 2>/dev/null || true
+            echo "Boot failed. Collecting stderr..." > "$LOGDIR/boot_failure_log.txt"
+            cp "$EMU_STDERR" "$LOGDIR/boot_failure_log.txt" || true
+            kill -9 $EMU_PID 2>/dev/null || true
           fi
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: emulator-data
           path: emulator_logs
 
-  # -----------------------------------------------------------------
-  # JOB 4: FINAL REPORT (STRICT MODE)
-  # -----------------------------------------------------------------
   report:
     name: final-report
     runs-on: ubuntu-latest
@@ -369,7 +301,6 @@ jobs:
         continue-on-error: true
         with:
           path: artifacts
-      
       - name: generate-strict-report
         run: |
           OUT="FULL_STRICT_REPORT.txt"
@@ -378,27 +309,6 @@ jobs:
           echo "Timestamp: $(date)" >> "$OUT"
           echo "Run ID: ${{ github.run_id }}" >> "$OUT"
           echo "========================" >> "$OUT"
-          
-          # Функция для безопасного добавления контента
-          append_section() {
-            TITLE=$1
-            PATTERN=$2
-            echo "" >> "$OUT"
-            echo "[$TITLE]" >> "$OUT"
-            FOUND=$(find artifacts -name "$PATTERN" -type f | head -n 1)
-            if [ -n "$FOUND" ]; then
-               # Если файл есть, грепаем или выводим целиком
-               if [ "$3" == "full" ]; then
-                  cat "$FOUND" >> "$OUT"
-               else
-                  grep -E "$3" "$FOUND" | head -n 50 >> "$OUT" || echo "Clean (No patterns found)." >> "$OUT"
-               fi
-            else
-               echo "Data not available (Artifact missing)." >> "$OUT"
-            fi
-          }
-          
-          # 1. Runtime Crashes (самое важное)
           echo "" >> "$OUT"
           echo "[SECTION: RUNTIME CRASHES]" >> "$OUT"
           if find artifacts -name "runtime_crashes.txt" -type f -exec grep -q "." {} \; ; then
@@ -406,45 +316,30 @@ jobs:
           else
              echo "No Runtime Crashes Detected." >> "$OUT"
           fi
-          
-          # Проверка на Boot Error
-          if find artifacts -name "boot_error.txt" -type f; then
+          if find artifacts -name "boot_error.txt" -type f -print -quit | grep -q . ; then
              echo "CRITICAL FAILURE: EMULATOR DID NOT BOOT" >> "$OUT"
           fi
-          if find artifacts -name "install_error.txt" -type f; then
+          if find artifacts -name "install_error.txt" -type f -print -quit | grep -q . ; then
              echo "CRITICAL FAILURE: APK INSTALLATION FAILED" >> "$OUT"
           fi
-          
-          # 2. Build Errors
           echo "" >> "$OUT"
           echo "[SECTION: BUILD ERRORS]" >> "$OUT"
           find artifacts -name "build-*-assemble.txt" -type f -exec grep -E "FAILURE|FAILED|Error:" {} + >> "$OUT" || true
-          
-          # 3. Unit Test Failures
           echo "" >> "$OUT"
           echo "[SECTION: UNIT TEST FAILURES]" >> "$OUT"
           find artifacts -name "diagnostics-*-unit-*.txt" -type f -exec grep -E "FAILED|FAILURE" {} + >> "$OUT" || true
-          
-          # 4. Lint Issues
           echo "" >> "$OUT"
           echo "[SECTION: LINT SUMMARY]" >> "$OUT"
-          find artifacts -name "diagnostics-*-lint.txt" -type f -exec grep -E "Error" {} + | head -n 20 >> "$OUT" || true
-          
-          # 5. Native Libs
+          find artifacts -name "diagnostics-*-lint.txt" -type f -exec grep -E "Error" {} + | head -n 200 >> "$OUT" || true
           echo "" >> "$OUT"
           echo "[SECTION: NATIVE LIBS]" >> "$OUT"
           find artifacts -name "native_libs_structure.txt" -type f -exec cat {} + >> "$OUT" || true
-          
-          # 6. Emulator Logs (Stderr)
           echo "" >> "$OUT"
-          echo "[SECTION: EMULATOR STDERR (LAST 50 LINES)]" >> "$OUT"
-          find artifacts -name "emu_stderr.txt" -type f -exec tail -n 50 {} + >> "$OUT" || true
-          
-          # 7. Memory Stats (если есть)
+          echo "[SECTION: EMULATOR STDERR (LAST 200 LINES)]" >> "$OUT"
+          find artifacts -name "emu_stderr.txt" -type f -exec tail -n 200 {} + >> "$OUT" || true
           echo "" >> "$OUT"
           echo "[SECTION: MEMORY MONITOR SNAPSHOT]" >> "$OUT"
-          find artifacts -name "memory_monitor.txt" -type f -exec tail -n 10 {} + >> "$OUT" || true
-
+          find artifacts -name "memory_monitor.txt" -type f -exec tail -n 20 {} + >> "$OUT" || true
       - uses: actions/upload-artifact@v4
         with:
           name: FINAL_REPORT
