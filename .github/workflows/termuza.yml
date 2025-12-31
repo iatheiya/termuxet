@@ -260,41 +260,8 @@ jobs:
           disable-linux-hw-accel: false
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel on -no-snapshot-save -no-metrics
           emulator-boot-timeout: ${{ env.EMU_BOOT_TIMEOUT_SEC }}
-          script: |
-            bash -eux - <<'BASH'
-            set -o pipefail
-            mkdir -p emulator_logs
-            adb devices -l > emulator_logs/adb_devices_before.txt || true
-            adb wait-for-device
-            timeout 300s adb install -r "$APK_PATH" > emulator_logs/install_log.txt 2>&1 || true
-
-            AAPT2=$(command -v aapt2 || true)
-            AAPT=$(command -v aapt || true)
-            PKG=""
-            MAINACT=""
-
-            if [ -n "$AAPT2" ]; then
-              PKG=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true)
-              MAINACT=$($AAPT2 dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true)
-            elif [ -n "$AAPT" ]; then
-              PKG=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/package: name=/{print $2; exit}' || true)
-              MAINACT=$($AAPT dump badging "$APK_PATH" 2>/dev/null | awk -F"'" '/launchable-activity: name=/{print $2; exit}' || true)
-            fi
-
-            echo "PKG=${PKG}" > emulator_logs/pkg.txt
-
-            if [ -n "$PKG" ]; then
-              if [ -n "$MAINACT" ]; then
-                adb shell am start -n "${PKG}/${MAINACT}" > emulator_logs/launch_log.txt 2>&1 || true
-              else
-                adb shell monkey -p "${PKG}" -c android.intent.category.LAUNCHER 1 > emulator_logs/launch_log.txt 2>&1 || true
-              fi
-              sleep 5
-              adb logcat -d > emulator_logs/logcat.txt || true
-            else
-              echo "PKG_NOT_DETECTED" > emulator_logs/pkg_error.txt
-            fi
-            BASH
+          script: >
+            bash -eux -c "set -eux; mkdir -p emulator_logs; adb devices -l > emulator_logs/adb_devices_before.txt || true; adb wait-for-device; timeout 300s adb install -r \"$APK_PATH\" > emulator_logs/install_log.txt 2>&1 || true; AAPT2=$(command -v aapt2 || true); AAPT=$(command -v aapt || true); PKG=\"\"; MAINACT=\"\"; if [ -n \"$AAPT2\" ]; then PKG=$($AAPT2 dump badging \"$APK_PATH\" 2>/dev/null | sed -n \"s/^package: name='\\([^']*\\)'.*$/\\1/p; q\") || true; MAINACT=$($AAPT2 dump badging \"$APK_PATH\" 2>/dev/null | sed -n \"s/^launchable-activity: name='\\([^']*\\)'.*$/\\1/p; q\") || true; elif [ -n \"$AAPT\" ]; then PKG=$($AAPT dump badging \"$APK_PATH\" 2>/dev/null | sed -n \"s/^package: name='\\([^']*\\)'.*$/\\1/p; q\") || true; MAINACT=$($AAPT dump badging \"$APK_PATH\" 2>/dev/null | sed -n \"s/^launchable-activity: name='\\([^']*\\)'.*$/\\1/p; q\") || true; fi; echo \"PKG=${PKG}\" > emulator_logs/pkg.txt; if [ -n \"$PKG\" ]; then if [ -n \"$MAINACT\" ]; then adb shell am start -n \"${PKG}/${MAINACT}\" > emulator_logs/launch_log.txt 2>&1 || true; else adb shell monkey -p \"${PKG}\" -c android.intent.category.LAUNCHER 1 > emulator_logs/launch_log.txt 2>&1 || true; fi; sleep 5; adb logcat -d > emulator_logs/logcat.txt || true; else echo \"PKG_NOT_DETECTED\" > emulator_logs/pkg_error.txt; fi"
 
       - uses: actions/upload-artifact@v4
         if: always()
