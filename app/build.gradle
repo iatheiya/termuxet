@@ -2,11 +2,6 @@ plugins {
     id "com.android.application"
 }
 
-ext {
-    packageVariant = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
-    markwonVersion = "4.6.2"
-}
-
 repositories {
     google()
     mavenCentral()
@@ -15,23 +10,21 @@ repositories {
 
 android {
     namespace "com.termux"
-    compileSdk 35
+    compileSdk 34
     ndkVersion = (System.getenv("JITPACK_NDK_VERSION") ?: "26.1.10909125") ?: "26.1.10909125"
 
     def appVersionName = (System.getenv("TERMUX_APP_VERSION_NAME") ?: "") ?: ""
     def apkVersionTag = (System.getenv("TERMUX_APK_VERSION_TAG") ?: "") ?: ""
     def splitAPKsForDebugBuilds = (System.getenv("TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS") ?: "1") ?: "1"
     def splitAPKsForReleaseBuilds = (System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0") ?: "0"
-    // Use the ext property (packageVariant) as the variant value inside the android block
-    def variantVal = project.ext.has("packageVariant") ? (project.ext.packageVariant ?: "apt-android-7") : "apt-android-7"
+    def variantVal = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
 
     defaultConfig {
         applicationId "com.termux"
         minSdk 24
-        targetSdk 35
+        targetSdk 34
         versionCode 118
         versionName appVersionName && appVersionName.trim() ? appVersionName : "0.118.0"
-        // validateVersionName(versionName)
         buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"${variantVal}\""
 
         manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.termux"
@@ -130,23 +123,27 @@ android {
 }
 
 dependencies {
-    implementation "androidx.annotation:annotation:1.9.1"
-    implementation "androidx.core:core:1.15.0"
-    implementation "androidx.drawerlayout:drawerlayout:1.2.0"
-    implementation "androidx.preference:preference:1.2.1"
-    implementation "androidx.viewpager:viewpager:1.1.0"
-    implementation "androidx.window:window:1.3.0"
-    implementation "com.google.android.material:material:1.12.0"
-    implementation "com.google.guava:guava:33.4.0-android"
-    implementation "io.noties.markwon:core:$markwonVersion"
-    implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
-    implementation "io.noties.markwon:linkify:$markwonVersion"
-    implementation "io.noties.markwon:recycler:$markwonVersion"
+    implementation libs.androidx.annotation
+    implementation libs.androidx.core
+    implementation libs.androidx.drawerlayout
+    implementation libs.androidx.preference
+    implementation libs.androidx.viewpager
+    implementation libs.androidx.window
+    implementation libs.com.google.material
+    implementation libs.com.google.guava
+
+    implementation libs.io.noties.markwon.core
+    implementation libs.io.noties.markwon.ext-strikethrough
+    implementation libs.io.noties.markwon.linkify
+    implementation libs.io.noties.markwon.recycler
+
     implementation project(":terminal-view")
     implementation project(":termux-shared")
-    testImplementation "junit:junit:4.13.2"
-    testImplementation "org.robolectric:robolectric:4.13.2"
-    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
+
+    testImplementation libs.junit
+    testImplementation libs.org.robolectric
+
+    coreLibraryDesugaring libs.com.android.tools.desugar
 }
 
 tasks.register("printVersionName") {
@@ -160,21 +157,17 @@ def validateVersionName(String versionName) {
 }
 
 def downloadBootstrap(String arch, String expectedChecksum, String version) {
-    // Strongly robust download helper: absolute path, ensure parent dirs exist, compute SHA-256 while streaming
     def digest = java.security.MessageDigest.getInstance("SHA-256")
     def relativePath = "src/main/cpp/bootstrap-${arch}.zip"
     def file = new File(project.projectDir, relativePath)
 
-    // Ensure parent directories exist before doing anything with the file
     def parent = file.parentFile
     if (parent != null && !parent.exists()) {
         if (!parent.mkdirs()) {
-            // best-effort retry
             parent.mkdirs()
         }
     }
 
-    // If file exists, validate checksum first
     if (file.exists() && file.length() > 0) {
         file.withInputStream { is ->
             def buffer = new byte[8192]
@@ -214,7 +207,6 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
             connection.connect()
         }
 
-        // Open output stream only after parent directory guaranteed to exist
         if (parent == null || !parent.exists()) {
             throw new GradleException("Failed to create parent directory for ${file.absolutePath}")
         }
@@ -259,8 +251,7 @@ tasks.named("clean") {
 
 tasks.register("downloadBootstraps") {
     doLast {
-        // Derive packageVariant from project.ext to avoid scope issues (MissingPropertyException)
-        def packageVariant = project.ext.has("packageVariant") ? (project.ext.packageVariant ?: "apt-android-7") : "apt-android-7"
+        def packageVariant = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
 
         if (packageVariant == "apt-android-7") {
             def version = "2022.04.28-r5+${packageVariant}"
