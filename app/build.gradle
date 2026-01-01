@@ -147,7 +147,7 @@ tasks.register('printVersionName') {
 }
 
 def validateVersionName(String versionName) {
-    def pattern = /^(0|[1-9]d*).(0|[1-9]d*).(0|[1-9]d*)(?:-((?:0|[1-9]d*|d*[a-zA-Z-][0-9a-zA-Z-]*)(?:.(?:0|[1-9]d*|d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:+([0-9a-zA-Z-]+(?:.[0-9a-zA-Z-]+)*))?$/
+    def pattern = /^(0|[1-9]d*).(0|[1-9]d*).(0|[1-9]d*)(?:-((?:0|[1-9]d*|d*[a-zA-Z-][0-9a-zA-Z-]*)(?:.(?:0|[1-9]d*|d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:.[0-9a-zA-Z-]+)*))?$/
     if (!(versionName ==~ pattern))
         throw new GradleException("The versionName '" + versionName + "' is not a valid version.")
 }
