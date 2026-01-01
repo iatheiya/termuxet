@@ -1,11 +1,5 @@
 apply plugin: 'com.android.application'
 
-repositories {
-    google()
-    mavenCentral()
-    maven { url "https://jitpack.io" }
-}
-
 android {
     namespace "com.termux"
     compileSdk 35
