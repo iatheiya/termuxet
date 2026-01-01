@@ -1,6 +1,4 @@
-plugins {
-    id "com.android.application"
-}
+apply plugin: 'com.android.application'
 
 repositories {
     google()
