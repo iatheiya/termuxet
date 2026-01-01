@@ -1,9 +1,9 @@
 [versions]
 agp = "8.7.3"
-appcompat = "1.9.1"
+appcompat = "1.7.1"
 annotation = "1.9.1"
-core = "1.15.0"
-material = "1.12.0"
+core-ktx = "1.15.0"
+material = "1.11.0"
 guava = "33.4.0-android"
 markwon = "4.6.2"
 hiddenapibypass = "6.1"
@@ -21,7 +21,7 @@ robolectric = "4.13.2"
 [libraries]
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
-androidx-core = { group = "androidx.core", name = "core", version.ref = "core" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
 com-google-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 com-google-guava = { group = "com.google.guava", name = "guava", version.ref = "guava" }
 
