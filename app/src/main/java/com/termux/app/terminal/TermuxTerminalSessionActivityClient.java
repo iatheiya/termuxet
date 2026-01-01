@@ -200,7 +200,8 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
                 new AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION).build()).build();
             try {
-                mBellSoundId = mBellSoundPool.load(mActivity, R.raw.bell, 1);
+                // Исправление: использование R-класса из termux-shared для доступа к ресурсу bell
+                mBellSoundId = mBellSoundPool.load(mActivity, com.termux.shared.R.raw.bell, 1);
             } catch (Exception e){
                 Logger.logStackTraceWithMessage(LOG_TAG, "Failed to load bell sound pool", e);
             }
@@ -431,4 +432,4 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
             mActivity.getWindow().getDecorView().setBackgroundColor(session.getEmulator().mColors.mCurrentColors[TextStyle.COLOR_INDEX_BACKGROUND]);
         }
     }
-} 
+}
