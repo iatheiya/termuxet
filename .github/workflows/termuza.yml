@@ -308,7 +308,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p emulator_logs
-          command -v adb >/dev/null 2>&1 && adb logcat -d > emulator_logs/logcat.txt || true
+          if ! command -v adb >/dev/null 2>&1; then
+            echo "adb_missing" > emulator_logs/logcat.txt
+            adb --version 2>&1 | sed -n '1,20p' > emulator_logs/adb_version.txt || true
+          else
+            adb --version 2>&1 | sed -n '1,20p' > emulator_logs/adb_version.txt || true
+            MAX_WAIT=60
+            INTERVAL=2
+            elapsed=0
+            device_found=0
+            while [ $elapsed -lt $MAX_WAIT ]; do
+              if adb devices -l | sed 1d | grep -E '\bdevice$' >/dev/null 2>&1; then
+                device_found=1
+                break
+              fi
+              sleep $INTERVAL
+              elapsed=$((elapsed + INTERVAL))
+            done
+            if [ $device_found -eq 1 ]; then
+              adb logcat -d > emulator_logs/logcat.txt 2>&1 || true
+              adb devices -l > emulator_logs/adb_devices_after.txt 2>&1 || true
+            else
+              adb devices -l > emulator_logs/adb_devices_after.txt 2>&1 || true
+              echo "NO_DEVICE_CONNECTED_AFTER_${MAX_WAIT}_SEC" > emulator_logs/logcat.txt
+            fi
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
