@@ -54,10 +54,10 @@ dependencies {
     implementation libs.com.google.material
     implementation libs.com.google.guava
 
-    implementation libs.io.noties.markwon.core
-    implementation libs.io.noties.markwon.ext-strikethrough
-    implementation libs.io.noties.markwon.linkify
-    implementation libs.io.noties.markwon.recycler
+    implementation libs.markwon.core
+    implementation libs.markwon.ext.strikethrough
+    implementation libs.markwon.linkify
+    implementation libs.markwon.recycler
 
     implementation libs.org.lsposed.hiddenapibypass
     implementation libs.androidx.window
