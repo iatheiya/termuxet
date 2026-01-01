@@ -76,6 +76,8 @@ jobs:
     needs: diagnostics
     if: always()
     timeout-minutes: 50
+    outputs:
+      apk_exists: ${{ steps.find_apk.outputs.apk_exists }}
     steps:
       - uses: actions/checkout@v4
 
@@ -152,8 +154,10 @@ jobs:
             cp "$SELECTED" build_out/apk/ || true
             echo "APK_PATH=build_out/apk/$(basename "$SELECTED")" >> $GITHUB_ENV
             echo "apk_exists=true" >> $GITHUB_ENV
+            echo "apk_exists=true" >> $GITHUB_OUTPUT
           else
             echo "apk_exists=false" >> $GITHUB_ENV
+            echo "apk_exists=false" >> $GITHUB_OUTPUT
           fi
 
       - name: analyze-artifacts
@@ -246,6 +250,10 @@ jobs:
             echo "apk_exists=true" >> $GITHUB_ENV
           else
             echo "apk_exists=false" >> $GITHUB_ENV
+            mkdir -p emulator_logs
+            echo "APK_NOT_FOUND_IN_BUILD_ARTIFACTS" > emulator_logs/apk_missing.txt
+            echo "No APK found in build-data artifact; failing emulator job to avoid long hangs." >> emulator_logs/apk_missing.txt
+            exit 1
           fi
 
       - name: ensure-emulator-logs
