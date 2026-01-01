@@ -30,7 +30,6 @@ android {
         targetSdk 35
         versionCode 118
         versionName appVersionName && appVersionName.trim() ? appVersionName : "0.118.0"
-        // validateVersionName(versionName)
         buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"${variantVal}\""
 
         manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.termux"
@@ -45,22 +44,22 @@ android {
         externalNativeBuild {
             ndkBuild {
                 cFlags "-std=c11", "-Wall", "-Wextra", "-Werror", "-Os", "-fno-stack-protector", "-Wl,--gc-sections"
-                if (project.hasProperty('ciArch')) {
+                if (project.hasProperty("ciArch")) {
                     abiFilters project.ciArch
                 } else {
-                    abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+                    abiFilters "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
                 }
             }
         }
 
         splits {
             abi {
-                enable (
+                enable(
                     (gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
                     (gradle.startParameter.taskNames.any { it.contains("Release") } && splitAPKsForReleaseBuilds == "1")
                 )
                 reset()
-                include 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+                include "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
                 universalApk true
             }
         }
@@ -73,10 +72,10 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file('testkey_untrusted.jks')
-            keyAlias 'alias'
-            storePassword 'xrj45yWGLbsO7W0v'
-            keyPassword 'xrj45yWGLbsO7W0v'
+            storeFile file("testkey_untrusted.jks")
+            keyAlias "alias"
+            storePassword "xrj45yWGLbsO7W0v"
+            keyPassword "xrj45yWGLbsO7W0v"
         }
     }
 
@@ -84,7 +83,7 @@ android {
         release {
             minifyEnabled true
             shrinkResources false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
         debug {
             signingConfig signingConfigs.debug
@@ -104,7 +103,7 @@ android {
     }
 
     lint {
-        disable 'ProtectedPermissions'
+        disable "ProtectedPermissions"
         abortOnError false
         checkReleaseBuilds false
     }
@@ -148,7 +147,7 @@ dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
 }
 
-tasks.register('printVersionName') {
+tasks.register("printVersionName") {
     doLast {
         println android.defaultConfig.versionName
     }
@@ -160,29 +159,41 @@ def validateVersionName(String versionName) {
 
 def downloadBootstrap(String arch, String expectedChecksum, String version) {
     def digest = java.security.MessageDigest.getInstance("SHA-256")
-    def localUrl = "src/main/cpp/bootstrap-" + arch + ".zip"
-    def file = new File(projectDir, localUrl)
+    def localPath = "src/main/cpp/bootstrap-${arch}.zip"
+    def file = layout.projectDirectory.file(localPath).asFile
+
     if (file.exists()) {
-        def buffer = new byte[8192]
-        def input = new FileInputStream(file)
-        while (true) {
-            def readBytes = input.read(buffer)
-            if (readBytes < 0) break
-            digest.update(buffer, 0, readBytes)
+        file.withInputStream { is ->
+            def buffer = new byte[8192]
+            int readBytes
+            while ((readBytes = is.read(buffer)) != -1) {
+                digest.update(buffer, 0, readBytes)
+            }
         }
         def checksum = new BigInteger(1, digest.digest()).toString(16)
         while (checksum.length() < 64) checksum = "0" + checksum
         if (checksum == expectedChecksum) return
-        else file.delete()
+        file.delete()
+        digest.reset()
     }
-    def remoteUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-" + version + "/bootstrap-" + arch + ".zip"
+
     file.parentFile.mkdirs()
-    def out = new BufferedOutputStream(new FileOutputStream(file))
+
+    def remoteUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${version}/bootstrap-${arch}.zip"
     def connection = new URL(remoteUrl).openConnection()
     connection.setInstanceFollowRedirects(true)
-    def digestStream = new java.security.DigestInputStream(connection.inputStream, digest)
-    out << digestStream
-    out.close()
+
+    connection.inputStream.withCloseable { is ->
+        def digestStream = new java.security.DigestInputStream(is, digest)
+        new FileOutputStream(file).withCloseable { os ->
+            def buffer = new byte[8192]
+            int readBytes
+            while ((readBytes = digestStream.read(buffer)) != -1) {
+                os.write(buffer, 0, readBytes)
+            }
+        }
+    }
+
     def checksum = new BigInteger(1, digest.digest()).toString(16)
     while (checksum.length() < 64) checksum = "0" + checksum
     if (checksum != expectedChecksum) {
@@ -191,15 +202,15 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
     }
 }
 
-tasks.named('clean') {
+tasks.named("clean") {
     doLast {
-        def tree = fileTree(new File(projectDir, 'src/main/cpp'))
-        tree.include 'bootstrap-*.zip'
+        def tree = fileTree(new File(projectDir, "src/main/cpp"))
+        tree.include "bootstrap-*.zip"
         tree.each { it.delete() }
     }
 }
 
-tasks.register('downloadBootstraps') {
+tasks.register("downloadBootstraps") {
     doLast {
         def packageVariant = variantVal
         if (packageVariant == "apt-android-7") {
