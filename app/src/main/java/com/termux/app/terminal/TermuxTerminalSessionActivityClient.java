@@ -16,7 +16,7 @@ import android.widget.ListView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.termux.app.R;
+import com.termux.R;
 import com.termux.shared.interact.ShareUtils;
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession;
 import com.termux.shared.termux.interact.TextInputDialogUtils;
@@ -263,7 +263,7 @@ public class TermuxTerminalSessionActivityClient extends TermuxTerminalSessionCl
     @SuppressLint("InflateParams")
     public void renameSession(final TerminalSession sessionToRename) {
         if (sessionToRename == null) return;
-        TextInputDialogUtils.textInput(mActivity, com.termux.shared.R.string.title_rename_session, sessionToRename.mSessionName, R.string.action_rename_session_confirm, text -> {
+        TextInputDialogUtils.textInput(mActivity, R.string.title_rename_session, sessionToRename.mSessionName, R.string.action_rename_session_confirm, text -> {
             renameSession(sessionToRename, text);
             termuxSessionListNotifyUpdated();
         }, -1, null, -1, null, null);
