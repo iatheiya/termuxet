@@ -15,12 +15,6 @@ dependencyResolutionManagement {
         maven { url "https://jitpack.io" }
         flatDir { dirs 'libs' }
     }
-
-    versionCatalogs {
-        libs {
-            from(files("gradle/libs.versions.toml"))
-        }
-    }
 }
 
 include ':app', ':termux-shared', ':terminal-emulator', ':terminal-view'
