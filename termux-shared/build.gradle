@@ -48,7 +48,6 @@ android {
 }
 
 dependencies {
-    // Changed to API to export resources and classes to the App module
     api libs.androidx.appcompat
     implementation libs.androidx.annotation
     api libs.androidx.core.ktx
@@ -65,7 +64,7 @@ dependencies {
     implementation libs.commons.io
 
     api project(":terminal-view")
-    implementation libs.termux.am.library
+    api libs.termux.am.library
 
     testImplementation libs.junit
     androidTestImplementation libs.androidx.test.ext.junit
