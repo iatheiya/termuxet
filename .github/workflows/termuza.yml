@@ -26,12 +26,15 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
+
       - run: chmod +x ./gradlew
+
       - name: collect-system-info
         run: |
           mkdir -p diagnostics_out
@@ -40,6 +43,7 @@ jobs:
           cat /proc/cpuinfo > diagnostics_out/cpuinfo.txt 2>/dev/null || true
           lsmod | grep kvm > diagnostics_out/kvm_modules.txt 2>/dev/null || true
           java -version > diagnostics_out/java_version.txt 2>&1 || true
+
       - name: unit-tests-debug
         continue-on-error: true
         run: |
@@ -47,6 +51,7 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="diagnostics_out/diagnostics-${RUNID}-unit-debug.txt"
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee "$OUT" || true
+
       - name: lint-check
         continue-on-error: true
         run: |
@@ -54,6 +59,7 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="diagnostics_out/diagnostics-${RUNID}-lint.txt"
           ./gradlew lint --stacktrace 2>&1 | tee "$OUT" || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,15 +75,19 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
+
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+
       - run: chmod +x ./gradlew
+
       - name: prepare-keystore
         run: |
           mkdir -p build_out
@@ -86,6 +96,7 @@ jobs:
           else
             keytool -genkeypair -v -keystore release.keystore -alias ci_release -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CI,OU=CI,O=CI,L=CI,ST=CI,C=US"
           fi
+
       - name: assemble-debug
         continue-on-error: true
         run: |
@@ -93,6 +104,7 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="build_out/build-${RUNID}-assemble.txt"
           ./gradlew clean assembleDebug -PciArch=${{ env.ANDROID_ARCH }} --stacktrace 2>&1 | tee "$OUT" || true
+
       - name: find-and-collect-apks
         id: find_apk
         run: |
@@ -127,6 +139,7 @@ jobs:
           else
             echo "apk_exists=false" >> $GITHUB_ENV
           fi
+
       - name: analyze-artifacts
         run: |
           mkdir -p build_out
@@ -147,6 +160,7 @@ jobs:
           else
             echo "MANIFEST_NOT_FOUND" > build_out/manifest_analysis.txt
           fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -162,21 +176,26 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
+
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
+
       - uses: actions/download-artifact@v4
         with:
           name: diagnostics-data
           path: diagnostics_out
+
       - uses: actions/download-artifact@v4
         with:
           name: build-data
           path: downloaded_build
+
       - name: locate-apk
         id: locate_apk
         run: |
@@ -212,6 +231,7 @@ jobs:
           else
             echo "apk_exists=false" >> $GITHUB_ENV
           fi
+
       - name: enable-kvm
         if: ${{ env.apk_exists == 'true' }}
         run: |
@@ -219,6 +239,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           sudo usermod -aG kvm $USER || true
+
       - name: install-build-tools
         if: ${{ env.apk_exists == 'true' }}
         run: |
@@ -226,6 +247,7 @@ jobs:
           export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/bin:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           yes | sdkmanager --install "platform-tools" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "platforms;android-${API_LEVEL}" || true
+
       - name: run-emulator-and-install
         if: ${{ env.apk_exists == 'true' }}
         uses: reactivecircus/android-emulator-runner@v2
@@ -239,7 +261,8 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel on -no-snapshot-save -no-metrics
           emulator-boot-timeout: ${{ env.EMU_BOOT_TIMEOUT_SEC }}
           script: >
-            bash -ex -c 'printf "%s\n" "mkdir -p emulator_logs" "adb devices -l > emulator_logs/adb_devices_before.txt || true" "adb wait-for-device" "timeout 300s adb install -r \"$APK_PATH\" > emulator_logs/install_log.txt 2>&1 || true" "AAPT2=$(command -v aapt2 || true)" "AAPT=$(command -v aapt || true)" "PKG=\"\"" "MAINACT=\"\"" "if [ -n \"$AAPT2\" ]; then" "  PKG=$($AAPT2 dump badging \"$APK_PATH\" 2>/dev/null | awk -F\"'\" '/package: name=/{print $2; exit}' || true)" "  MAINACT=$($AAPT2 dump badging \"$APK_PATH\" 2>/dev/null | awk -F\"'\" '/launchable-activity: name=/{print $2; exit}' || true)" "elif [ -n \"$AAPT\" ]; then" "  PKG=$($AAPT dump badging \"$APK_PATH\" 2>/dev/null | awk -F\"'\" '/package: name=/{print $2; exit}' || true)" "  MAINACT=$($AAPT dump badging \"$APK_PATH\" 2>/dev/null | awk -F\"'\" '/launchable-activity: name=/{print $2; exit}' || true)" "fi" "echo \"PKG=${PKG}\" > emulator_logs/pkg.txt" "if [ -n \"$PKG\" ]; then" "  if [ -n \"$MAINACT\" ]; then" "    adb shell am start -n \"${PKG}/${MAINACT}\" > emulator_logs/launch_log.txt 2>&1 || true" "  else" "    adb shell monkey -p \"${PKG}\" -c android.intent.category.LAUNCHER 1 > emulator_logs/launch_log.txt 2>&1 || true" "  fi" "  sleep 5" "  adb logcat -d > emulator_logs/logcat.txt || true" "else" "  echo \"PKG_NOT_DETECTED\" > emulator_logs/pkg_error.txt" "fi" > /tmp/ci_emulator_script.sh && chmod +x /tmp/ci_emulator_script.sh && /bin/bash /tmp/ci_emulator_script.sh'
+            printf '%s' 'IyEvdXNyL2Jpbi9lbnYgYmFzaApzZXQgLWV4dQpta2RpciAtcCBlbXVsYXRvcl9sb2dzCmFkYiBkZXZpY2VzIC1sID4gZW11bGF0b3JfbG9ncy9hZGJfZGV2aWNlc19iZWZvcmUudHh0IHx8IHRydWUKYWRiIHdhaXQtZm9yLWRldmljZQp0aW1lb3V0IDMwMHMgYWRiIGluc3RhbGwgLXIgIiRBUktfUEFUSCIgPiBlbXVsYXRvcl9sb2dzL2luc3RhbGxfbG9nLnR4dCAyPiYxIHx8IHRydWUKQUFQVDI9JChjb21tYW5kIC12IGFhcHQyIHwgdHJ1ZSkKQUFQVD0kKGNvbW1hbmQgLXYgYWFwdCB8IHRydWUpClBLRz0iIgpNQUlOQUNUPSIiCmlmIFsgLW4gIiRBUFBUMiIgXTsgdGhlbgogIFBLRz0kKCRBQVBUMiBkdW1wIGJhZGdpbmcgIiRBUktfUEFUSCIgMj4vZGV2L251bGwgfCBhd2sgLUYiJyciICcvcGFja2FnZTogbmFtZT0veyBwcmluZyAkMjsgZXhpdC8nICB8fSB0cnVlKQogIE1BSU5BQ1Q9JChAQVBUMiBkdW1wIGJhZGdpbmcgIiRBUktfUEFUSCIgMj4vZGV2L251bGwgfCBhd2sgLUYiJyciICcvbGF1bmNoYWJsZS1hY3Rpdml0eTogbmFtZT0veyBwcmluZyAkMjsgZXhpdC8nICB8fSB0cnVlKQplbGlmIFsgLW4gIiRBUFBUIiBdOyB0aGVuCiAgUktHPSQoJEFQVCBkdW1wIGJhZGdpbmcgIiRBUktfUEFUSCIgMj4vZGV2L251bGwgfCBhd2sgLUYiJyciICcvcGFja2FnZTogbmFtZT0veyBwcmluZyAkMjsgZXhpdC8nICB8fSB0cnVlKQogIE1BSU5BQ1Q9JChAQVBQIGR1bXAgYmFkZ2luZyAiJEFSS19QQVRI IiAyPi9kZXYvbnVsbCB8IGF3ayAtRiciICcvbGF1bmNoYWJsZS1hY3Rpdml0eTogbmFtZT0veyBwcmluZyAkMjsgZXhpdC8nICB8fSB0cnVlKQZpbgoKZWNobyAiUEtHPXskUEtHfSIgPiBlbXVsYXRvcl9sb2dzL3BrZy50eHQKaWYgWyAtbiAiJFBLRyIgXTsgdGhlbgogICAgaWYgWyAtbiAiJE1BSU5BQ1QiIF07IHRoZW4KICAgICAgYWRiIHNoZWxsIGFtIHN0YXJ0IC1uICIkUEtHLyRNTUlOQUNUIiA+IGVtdWxhdG9yX2xvZ3Mv bGF1bmNoX2xvZy50eHQgMj4mMSB8fCB0cnVlCiAgICAgZWxzZQogICAgICBhZGIgc2hlbG0gbW9ua2V5IC1wICIkUEtHIiAtYyBhbmRyb2lkLmludGVudC5jYXRlZ29yeS5MQVVOSUNIRVIgMSA+IGVtdWxhdG9yX2xvZ3Mv bGF1bmNoX2xvZy50eHQgMj4mMSB8fCB0cnVlCiAgICBmaQoKICAgIHNsZWVwIDUKICAgIGFkYiBsb2dnY2F0IC1kID4gZW11bGF0b3JfbG9ncy9sb2djYXQu dHh0IHx8IHRydWUKZWxzZQogICAgZWNobyAiUEtHX05PVF9ERVRFQ1RFRCIgPiBlbXVsYXRvcl9sb2dzL3BrZ19lcnJvci50eHQKZmkKZXhpdCAwCg==' | base64 -d > /tmp/ci_emulator_script.sh && chmod +x /tmp/ci_emulator_script.sh && /bin/bash /tmp/ci_emulator_script.sh
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -254,10 +277,12 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           path: artifacts
+
       - name: generate-strict-report
         run: |
           OUT="FULL_STRICT_REPORT.txt"
@@ -301,6 +326,7 @@ jobs:
           find artifacts -type f -name "logcat.txt" -exec tail -n 200 {} + >> "$OUT" || true
           echo "[SECTION: MEMORY USAGE]" >> "$OUT"
           find artifacts -type f -name "memory_monitor.txt" -exec tail -n 10 {} + >> "$OUT" || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: FINAL_REPORT
