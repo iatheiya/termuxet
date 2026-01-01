@@ -17,6 +17,7 @@ drawerlayout = "1.2.0"
 preference = "1.2.1"
 viewpager = "1.1.0"
 robolectric = "4.13.2"
+termux_am = "2.0.0"
 
 [libraries]
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
@@ -44,3 +45,4 @@ androidx-preference = { group = "androidx.preference", name = "preference", vers
 androidx-viewpager = { group = "androidx.viewpager", name = "viewpager", version.ref = "viewpager" }
 
 org-robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+termux-am-library = { group = "com.termux", name = "termux-am-library", version.ref = "termux_am" }
