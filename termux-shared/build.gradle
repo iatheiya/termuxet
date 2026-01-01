@@ -3,12 +3,12 @@ apply plugin: 'maven-publish'
 
 android {
     namespace 'com.termux.shared'
-    compileSdk 34
+    compileSdk 35
     ndkVersion (System.getenv("JITPACK_NDK_VERSION") ?: "26.1.10909125")
 
     defaultConfig {
         minSdk 24
-        targetSdk 34
+        targetSdk 35
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             ndkBuild {
