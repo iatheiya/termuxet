@@ -30,6 +30,7 @@ android {
         targetSdk 35
         versionCode 118
         versionName appVersionName && appVersionName.trim() ? appVersionName : "0.118.0"
+        // validateVersionName(versionName)
         buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"${variantVal}\""
 
         manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.termux"
@@ -159,10 +160,20 @@ def validateVersionName(String versionName) {
 
 def downloadBootstrap(String arch, String expectedChecksum, String version) {
     def digest = java.security.MessageDigest.getInstance("SHA-256")
-    def localPath = "src/main/cpp/bootstrap-${arch}.zip"
-    def file = layout.projectDirectory.file(localPath).asFile
+    def relativePath = "src/main/cpp/bootstrap-${arch}.zip"
+    def file = new File(project.projectDir, relativePath)
 
-    if (file.exists()) {
+    // Ensure parent directories exist before doing anything with the file
+    def parent = file.parentFile
+    if (parent != null && !parent.exists()) {
+        if (!parent.mkdirs()) {
+            // try again (best-effort); if it still fails, we'll attempt to open the stream and fail with clear error
+            parent.mkdirs()
+        }
+    }
+
+    // If file exists, validate checksum and return if OK
+    if (file.exists() && file.length() > 0) {
         file.withInputStream { is ->
             def buffer = new byte[8192]
             int readBytes
@@ -172,32 +183,71 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
         }
         def checksum = new BigInteger(1, digest.digest()).toString(16)
         while (checksum.length() < 64) checksum = "0" + checksum
-        if (checksum == expectedChecksum) return
-        file.delete()
-        digest.reset()
+        if (checksum == expectedChecksum) {
+            return
+        } else {
+            file.delete()
+            digest.reset()
+        }
     }
-
-    file.parentFile.mkdirs()
 
     def remoteUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${version}/bootstrap-${arch}.zip"
     def connection = new URL(remoteUrl).openConnection()
     connection.setInstanceFollowRedirects(true)
 
-    connection.inputStream.withCloseable { is ->
-        def digestStream = new java.security.DigestInputStream(is, digest)
-        new FileOutputStream(file).withCloseable { os ->
-            def buffer = new byte[8192]
-            int readBytes
-            while ((readBytes = digestStream.read(buffer)) != -1) {
-                os.write(buffer, 0, readBytes)
+    def httpConn = null
+    if (connection instanceof HttpURLConnection) {
+        httpConn = (HttpURLConnection) connection
+        httpConn.setRequestMethod("GET")
+        httpConn.connect()
+        def code = httpConn.getResponseCode()
+        if (code >= 400) {
+            if (httpConn.getErrorStream() != null) {
+                httpConn.getErrorStream().close()
             }
+            throw new GradleException("Failed to download ${remoteUrl}, HTTP response code: ${code}")
+        }
+    } else {
+        connection.connect()
+    }
+
+    // Open output stream only after parent directory guaranteed to exist
+    if (parent == null || !parent.exists()) {
+        throw new GradleException("Failed to create parent directory for ${file.absolutePath}")
+    }
+
+    try {
+        def inputStream = connection.getInputStream()
+        try {
+            def digestStream = new java.security.DigestInputStream(inputStream, digest)
+            new BufferedOutputStream(new FileOutputStream(file)).withCloseable { out ->
+                def buffer = new byte[8192]
+                int readBytes
+                while ((readBytes = digestStream.read(buffer)) != -1) {
+                    out.write(buffer, 0, readBytes)
+                }
+                out.flush()
+            }
+        } finally {
+            if (inputStream != null) {
+                inputStream.close()
+            }
+        }
+    } catch (Exception e) {
+        if (file.exists()) {
+            file.delete()
+        }
+        throw new GradleException("Error downloading ${remoteUrl}: " + e.getMessage(), e)
+    } finally {
+        if (httpConn != null) {
+            httpConn.disconnect()
         }
     }
 
     def checksum = new BigInteger(1, digest.digest()).toString(16)
     while (checksum.length() < 64) checksum = "0" + checksum
     if (checksum != expectedChecksum) {
-        file.delete()
+        if (file.exists()) file.delete()
         throw new GradleException("Wrong checksum for " + remoteUrl)
     }
 }
