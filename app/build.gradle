@@ -3,7 +3,7 @@ plugins {
 }
 
 ext {
-    packageVariant = System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7"
+    packageVariant = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
     markwonVersion = "4.6.2"
 }
 
@@ -16,22 +16,22 @@ repositories {
 android {
     namespace "com.termux"
     compileSdk 35
-    ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: "26.1.10909125"
+    ndkVersion = (System.getenv("JITPACK_NDK_VERSION") ?: "26.1.10909125") ?: "26.1.10909125"
 
-    def appVersionName = System.getenv("TERMUX_APP_VERSION_NAME") ?: ""
-    def apkVersionTag = System.getenv("TERMUX_APK_VERSION_TAG") ?: ""
-    def splitAPKsForDebugBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS") ?: "1"
-    def splitAPKsForReleaseBuilds = System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0"
+    def appVersionName = (System.getenv("TERMUX_APP_VERSION_NAME") ?: "") ?: ""
+    def apkVersionTag = (System.getenv("TERMUX_APK_VERSION_TAG") ?: "") ?: ""
+    def splitAPKsForDebugBuilds = (System.getenv("TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS") ?: "1") ?: "1"
+    def splitAPKsForReleaseBuilds = (System.getenv("TERMUX_SPLIT_APKS_FOR_RELEASE_BUILDS") ?: "0") ?: "0"
 
     defaultConfig {
         applicationId "com.termux"
         minSdk 24
         targetSdk 35
         versionCode 118
-        versionName "0.118.0"
-        if (appVersionName) versionName = appVersionName
+        versionName appVersionName && appVersionName.trim() ? appVersionName : "0.118.0"
         // validateVersionName(versionName)
-        buildConfigField "String", "TERMUX_PACKAGE_VARIANT", ""${project.ext.packageVariant}""
+        buildConfigField "String", "TERMUX_PACKAGE_VARIANT", ""${project.ext.packageVariant ?: ""}""
+
         manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.termux"
         manifestPlaceholders.TERMUX_APP_NAME = "Termux"
         manifestPlaceholders.TERMUX_API_APP_NAME = "Termux:API"
@@ -54,8 +54,10 @@ android {
 
         splits {
             abi {
-                enable ((gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
-                    (gradle.startParameter.taskNames.any { it.contains("Release") } && splitAPKsForReleaseBuilds == "1"))
+                enable (
+                    (gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
+                    (gradle.startParameter.taskNames.any { it.contains("Release") } && splitAPKsForReleaseBuilds == "1")
+                )
                 reset()
                 include 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
                 universalApk true
@@ -115,7 +117,11 @@ android {
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach { output ->
             def abi = output.getFilter(com.android.build.OutputFile.ABI)
-            output.outputFileName = "termux-app_" + (apkVersionTag ? apkVersionTag : project.ext.packageVariant + "-" + variant.buildType.name) + "_" + (abi ? abi : "universal") + ".apk"
+            def tag = apkVersionTag ?: ""
+            def variantType = variant.buildType?.name ?: "debug"
+            def pkgVar = project.ext.packageVariant ?: "default"
+            def namePart = tag ? tag : pkgVar + "-" + variantType
+            output.outputFileName = "termux-app_" + namePart + "_" + (abi ? abi : "universal") + ".apk"
         }
     }
 }
@@ -147,7 +153,6 @@ tasks.register('printVersionName') {
 }
 
 def validateVersionName(String versionName) {
-    // Проверка отключена, чтобы не блокировать кастомную сборку
     return
 }
 
@@ -193,7 +198,7 @@ tasks.named('clean') {
 
 tasks.register('downloadBootstraps') {
     doLast {
-        def packageVariant = project.ext.packageVariant
+        def packageVariant = (project.ext.packageVariant ?: "apt-android-7")
         if (packageVariant == "apt-android-7") {
             def version = "2022.04.28-r5" + "+" + packageVariant
             downloadBootstrap("aarch64", "4a51a7eb209fe82efc24d52e3cccc13165f27377290687cb82038cbd8e948430", version)
