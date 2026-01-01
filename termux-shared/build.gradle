@@ -48,11 +48,12 @@ android {
 }
 
 dependencies {
+    // Changed to API to export resources and classes to the App module
     api libs.androidx.appcompat
     implementation libs.androidx.annotation
     api libs.androidx.core.ktx
-    implementation libs.com.google.material
-    implementation libs.com.google.guava
+    api libs.com.google.material
+    api libs.com.google.guava
 
     implementation libs.markwon.core
     implementation libs.markwon.ext.strikethrough
@@ -60,11 +61,11 @@ dependencies {
     implementation libs.markwon.recycler
 
     implementation libs.org.lsposed.hiddenapibypass
-    implementation libs.androidx.window
+    api libs.androidx.window
     implementation libs.commons.io
 
     api project(":terminal-view")
-    implementation "com.termux:termux-am-library:v2.0.0"
+    implementation libs.termux.am.library
 
     testImplementation libs.junit
     androidTestImplementation libs.androidx.test.ext.junit
