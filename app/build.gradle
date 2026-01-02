@@ -96,6 +96,7 @@ android {
             keyPassword "xrj45yWGLbsO7W0v"
             v1SigningEnabled true
             v2SigningEnabled true
+            v3SigningEnabled true
         }
     }
 
@@ -130,7 +131,7 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging true
+            useLegacyPackaging false
         }
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
