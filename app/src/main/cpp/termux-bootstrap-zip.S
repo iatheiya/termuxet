@@ -2,8 +2,6 @@
 .align 8
 .global blob
 .global blob_size
-.hidden blob
-.hidden blob_size
 .type blob, %object
 .type blob_size, %object
 
