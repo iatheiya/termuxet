@@ -146,6 +146,7 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
     def digest = java.security.MessageDigest.getInstance("SHA-256")
     def relativePath = "src/main/cpp/bootstrap-${arch}.zip"
     def file = new File(project.projectDir, relativePath)
+    def tmp = new File(project.projectDir, relativePath + ".tmp")
     def parent = file.parentFile
     if (parent != null && !parent.exists()) {
         if (!parent.mkdirs()) {
@@ -160,8 +161,8 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
                 digest.update(buffer, 0, readBytes)
             }
         }
-        def checksum = String.format("%064x", new BigInteger(1, digest.digest()))
-        if (checksum == expectedChecksum) {
+        def checksumExisting = String.format("%064x", new BigInteger(1, digest.digest()))
+        if (checksumExisting == expectedChecksum) {
             return
         } else {
             file.delete()
@@ -169,52 +170,30 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
         }
     }
     def remoteUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${version}/bootstrap-${arch}.zip"
-    def connection = new URL(remoteUrl).openConnection()
-    connection.setInstanceFollowRedirects(true)
-    def httpConn = null
     try {
-        if (connection instanceof HttpURLConnection) {
-            httpConn = (HttpURLConnection) connection
-            httpConn.setRequestMethod("GET")
-            httpConn.connect()
-            def code = httpConn.getResponseCode()
-            if (code >= 400) {
-                if (httpConn.getErrorStream() != null) {
-                    httpConn.getErrorStream().close()
-                }
-                throw new GradleException("Failed to download ${remoteUrl}, HTTP response code: ${code}")
-            }
-        } else {
-            connection.connect()
-        }
-        if (parent == null || !parent.exists()) {
-            throw new GradleException("Failed to create parent directory for ${file.absolutePath}")
-        }
-        connection.inputStream.withCloseable { is ->
-            def digestStream = new java.security.DigestInputStream(is, digest)
-            new BufferedOutputStream(new FileOutputStream(file)).withCloseable { out ->
-                def buffer = new byte[8192]
-                int readBytes
-                while ((readBytes = digestStream.read(buffer)) != -1) {
-                    out.write(buffer, 0, readBytes)
-                }
-                out.flush()
+        if (tmp.exists()) tmp.delete()
+        ant.get(src: remoteUrl, dest: tmp.absolutePath)
+        tmp.withInputStream { is ->
+            def buffer = new byte[8192]
+            int readBytes
+            while ((readBytes = is.read(buffer)) != -1) {
+                digest.update(buffer, 0, readBytes)
             }
         }
         def checksum = String.format("%064x", new BigInteger(1, digest.digest()))
         if (checksum != expectedChecksum) {
-            if (file.exists()) file.delete()
+            if (tmp.exists()) tmp.delete()
             throw new GradleException("Wrong checksum for " + remoteUrl)
         }
+        if (file.exists()) file.delete()
+        def moved = tmp.renameTo(file)
+        if (!moved) {
+            file.bytes = tmp.bytes
+            tmp.delete()
+        }
     } catch (Exception e) {
-        if (file.exists()) {
-            file.delete()
-        }
+        if (tmp.exists()) tmp.delete()
         throw new GradleException("Error downloading ${remoteUrl}: " + e.getMessage(), e)
-    } finally {
-        if (httpConn != null) {
-            httpConn.disconnect()
-        }
     }
 }
 
@@ -226,7 +205,7 @@ tasks.named("clean") {
     }
 }
 
-tasks.register("downloadBootstraps") {
+def downloadBootstrapsProvider = tasks.register("downloadBootstraps") {
     doLast {
         def packageVariant = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
         if (packageVariant == "apt-android-7") {
@@ -245,7 +224,7 @@ tasks.register("downloadBootstraps") {
     }
 }
 
-def bootstrapTaskProvider = tasks.named("downloadBootstraps")
+def bootstrapTaskProvider = downloadBootstrapsProvider
 
 tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask).configureEach {
     dependsOn bootstrapTaskProvider
