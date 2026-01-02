@@ -53,6 +53,12 @@ android {
         }
     }
 
+    sourceSets {
+        main {
+            assets.srcDirs += 'src/main/cpp'
+        }
+    }
+
     splits {
         abi {
             enable(
@@ -281,7 +287,7 @@ tasks.register("collectLocalBootstraps") {
                     println "--- Primary attempts failed, trying ant.get backup ${backupUrl}"
                     ant.get(src: backupUrl, dest: targetFile, verbose: true)
                 } catch (Exception e2) {
-                    throw new GradleException("Could not download bootstrap for ${termuxArch}. Please check internet connection or set TERMUX_BOOTSTRAP_URL or TERMUX_BOOTSTRAP_URLS to a mirror.")
+                    throw new GradleException("Could not download bootstrap for ${termuxArch}. Please check internet connection or set TERMUX_BOOTSTRAP_URL to a mirror.")
                 }
             }
         }
