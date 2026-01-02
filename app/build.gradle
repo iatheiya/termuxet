@@ -172,59 +172,94 @@ tasks.register("collectLocalBootstraps") {
     doLast {
         def bootstrapVersion = "2024.03.04-r1%2Bapt-android-7"
         def baseUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${bootstrapVersion}"
-        
         def projectDirFile = project.projectDir
         def outputDir = new File(projectDirFile, "src/main/cpp")
-        
+        if (!outputDir.exists()) {
+            if (!outputDir.mkdirs()) {
+                throw new GradleException("Failed to create output directory: ${outputDir.absolutePath}")
+            }
+        }
+        if (!outputDir.canWrite()) {
+            outputDir.setWritable(true, false)
+        }
         def archMap = [
             'arm64-v8a': 'aarch64',
             'armeabi-v7a': 'arm',
             'x86': 'i686',
             'x86_64': 'x86_64'
         ]
-
         def possibleDirs = [
             new File(projectDirFile, "bootstrap-out"),
             new File(projectDirFile, "build/bootstrap"),
             new File(projectDirFile, "../termux-packages/out")
         ]
-
         def targetAbis = android.defaultConfig.ndk.abiFilters
         if (targetAbis == null || targetAbis.isEmpty()) {
             targetAbis = archMap.keySet()
         }
-
         targetAbis.each { gradleArch ->
             if (!archMap.containsKey(gradleArch)) return
-            
             def termuxArch = archMap[gradleArch]
             def zipName = "bootstrap-${termuxArch}.zip"
             def targetFile = new File(outputDir, zipName)
-
             if (targetFile.exists() && targetFile.length() > 0) {
+                println "Bootstrap exists: ${targetFile.absolutePath}"
                 return
             }
-
             boolean foundLocally = false
             for (File dir : possibleDirs) {
                 if (!dir.exists()) continue
                 def candidate = new File(dir, zipName)
                 if (candidate.exists() && candidate.length() > 0) {
-                    ant.copy(file: candidate.absolutePath, tofile: targetFile.absolutePath, overwrite: true)
-                    foundLocally = true
-                    break
+                    try {
+                        targetFile.withOutputStream { os ->
+                            candidate.withInputStream { is -> os << is }
+                        }
+                        if (!targetFile.canRead()) targetFile.setReadable(true, false)
+                        if (!targetFile.canWrite()) targetFile.setWritable(true, false)
+                        println "Copied local bootstrap from ${candidate.absolutePath}"
+                        foundLocally = true
+                        break
+                    } catch (Exception e) {
+                        if (targetFile.exists()) targetFile.delete()
+                        throw new GradleException("Failed to copy local bootstrap ${candidate.absolutePath} -> ${targetFile.absolutePath}", e)
+                    }
                 }
             }
-
             if (!foundLocally) {
                 def downloadUrl = "${baseUrl}/${zipName}"
+                def tmpFile = new File(outputDir, zipName + ".tmp")
+                if (tmpFile.exists()) tmpFile.delete()
                 try {
-                    if (!outputDir.exists()) outputDir.mkdirs()
                     println "Downloading ${zipName} from ${downloadUrl}..."
-                    ant.get(src: downloadUrl, dest: targetFile, verbose: true)
+                    new URL(downloadUrl).withInputStream { is ->
+                        tmpFile.withOutputStream { os ->
+                            byte[] buffer = new byte[8192]
+                            int bytesRead
+                            while ((bytesRead = is.read(buffer)) != -1) {
+                                os.write(buffer, 0, bytesRead)
+                            }
+                        }
+                    }
+                    if (tmpFile.length() == 0) {
+                        tmpFile.delete()
+                        throw new GradleException("Downloaded file is empty for ${zipName}")
+                    }
+                    try {
+                        java.nio.file.Files.move(tmpFile.toPath(), targetFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    } catch (Exception e) {
+                        if (targetFile.exists()) targetFile.delete()
+                        if (!tmpFile.renameTo(targetFile)) {
+                            throw new GradleException("Failed to move downloaded bootstrap to target location: ${e.message}", e)
+                        }
+                    }
+                    if (!targetFile.canRead()) targetFile.setReadable(true, false)
+                    if (!targetFile.canWrite()) targetFile.setWritable(true, false)
+                    println "Downloaded bootstrap to ${targetFile.absolutePath}"
                 } catch (Exception e) {
+                    if (tmpFile.exists()) tmpFile.delete()
                     if (targetFile.exists()) targetFile.delete()
-                    throw new GradleException("Failed to download bootstrap for ${termuxArch} from ${downloadUrl}", e)
+                    throw new GradleException("Failed to obtain bootstrap for ${termuxArch} from ${downloadUrl}", e)
                 }
             }
         }
