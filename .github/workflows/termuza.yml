@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 env:
+  TERMUX_SKIP_BOOTSTRAP_DOWNLOAD: '0'
   JAVA_VERSION: '17'
   API_LEVEL: '30'
   ANDROID_TARGET: 'google_apis'
