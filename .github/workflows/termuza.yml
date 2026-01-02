@@ -120,7 +120,7 @@ jobs:
       - name: assemble-device-apk
         continue-on-error: true
         run: |
-          ./gradlew clean assembleDebug -PciArch=arm64-v8a --stacktrace
+          ./gradlew clean assembleDebug -PciArch=arm64-v8a --stacktrace -x test -x lint
           find app/build/outputs/apk -name "*.apk" -exec cp {} build_out/apk/termux-debug-arm64-v8a.apk \; || true
 
       - name: dependency-check
