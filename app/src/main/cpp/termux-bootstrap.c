@@ -1,6 +1,6 @@
 #include <jni.h>
 
-extern const unsigned char blob[];
+extern const char blob[];
 extern const int blob_size;
 
 JNIEXPORT jbyteArray JNICALL Java_com_termux_app_TermuxInstaller_getZip(JNIEnv *env, jobject This)
