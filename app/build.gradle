@@ -170,20 +170,12 @@ tasks.named("clean") {
 
 tasks.register("collectLocalBootstraps") {
     doLast {
-        def useRemote = ((System.getenv("TERMUX_USE_REMOTE_BOOTSTRAPS") ?: "0") == "1")
-        if (useRemote) {
-            println "TERMUX_USE_REMOTE_BOOTSTRAPS=1 -> remote mode enabled"
-            return
-        }
-
+        def bootstrapVersion = "2024.03.04-r1%2Bapt-android-7"
+        def baseUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${bootstrapVersion}"
+        
         def projectDirFile = project.projectDir
-        def possibleDirs = [
-            new File(projectDirFile, "src/main/cpp"),
-            new File(projectDirFile, "bootstrap-out"),
-            new File(projectDirFile, "build/bootstrap"),
-            new File(projectDirFile, "../termux-packages/out")
-        ]
-
+        def outputDir = new File(projectDirFile, "src/main/cpp")
+        
         def archMap = [
             'arm64-v8a': 'aarch64',
             'armeabi-v7a': 'arm',
@@ -191,33 +183,49 @@ tasks.register("collectLocalBootstraps") {
             'x86_64': 'x86_64'
         ]
 
-        archMap.each { gradleArch, termuxArch ->
-            def targetZipName = "bootstrap-${termuxArch}.zip"
-            def targetZip = new File(projectDirFile, "src/main/cpp/${targetZipName}")
+        def possibleDirs = [
+            new File(projectDirFile, "bootstrap-out"),
+            new File(projectDirFile, "build/bootstrap"),
+            new File(projectDirFile, "../termux-packages/out")
+        ]
 
-            if (targetZip.exists() && targetZip.length() > 0) {
+        def targetAbis = android.defaultConfig.ndk.abiFilters
+        if (targetAbis == null || targetAbis.isEmpty()) {
+            targetAbis = archMap.keySet()
+        }
+
+        targetAbis.each { gradleArch ->
+            if (!archMap.containsKey(gradleArch)) return
+            
+            def termuxArch = archMap[gradleArch]
+            def zipName = "bootstrap-${termuxArch}.zip"
+            def targetFile = new File(outputDir, zipName)
+
+            if (targetFile.exists() && targetFile.length() > 0) {
                 return
             }
 
-            boolean found = false
+            boolean foundLocally = false
             for (File dir : possibleDirs) {
                 if (!dir.exists()) continue
-                def candidates = [
-                    new File(dir, "bootstrap-${termuxArch}.zip"),
-                    new File(dir, "bootstrap-${gradleArch}.zip")
-                ]
-                for (File f : candidates) {
-                    if (f.exists() && f.length() > 0) {
-                        ant.copy(file: f.absolutePath, tofile: targetZip.absolutePath, overwrite: true)
-                        found = true
-                        break
-                    }
+                def candidate = new File(dir, zipName)
+                if (candidate.exists() && candidate.length() > 0) {
+                    ant.copy(file: candidate.absolutePath, tofile: targetFile.absolutePath, overwrite: true)
+                    foundLocally = true
+                    break
                 }
-                if (found) break
             }
 
-            if (!found && !(targetZip.exists() && targetZip.length() > 0)) {
-                throw new GradleException("Bootstrap for ${gradleArch} (mapped to ${termuxArch}) not found. Expected ${targetZipName} in one of: ${possibleDirs}. To use remote downloads set TERMUX_USE_REMOTE_BOOTSTRAPS=1")
+            if (!foundLocally) {
+                def downloadUrl = "${baseUrl}/${zipName}"
+                try {
+                    if (!outputDir.exists()) outputDir.mkdirs()
+                    println "Downloading ${zipName} from ${downloadUrl}..."
+                    ant.get(src: downloadUrl, dest: targetFile, verbose: true)
+                } catch (Exception e) {
+                    if (targetFile.exists()) targetFile.delete()
+                    throw new GradleException("Failed to download bootstrap for ${termuxArch} from ${downloadUrl}", e)
+                }
             }
         }
     }
