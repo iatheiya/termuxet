@@ -50,8 +50,8 @@ android {
 
         externalNativeBuild {
             ndkBuild {
-                cFlags "-std=c11", "-Wall", "-Wextra", "-Werror", "-Os", "-fno-stack-protector", "-Wl,--gc-sections"
-                // Removed explicit APP_PLATFORM, let NDK handle minSdk
+                // Added -I flag with absolute path to ensure .incbin finds the bootstrap zips
+                cFlags "-std=c11", "-Wall", "-Wextra", "-Werror", "-Os", "-fno-stack-protector", "-Wl,--gc-sections", "-I${project.file('src/main/cpp').absolutePath}"
             }
         }
     }
@@ -301,7 +301,6 @@ afterEvaluate {
         def collectTask = tasks.named("collectLocalBootstraps")
         variant.preBuildProvider.get().dependsOn(collectTask)
         variant.javaCompileProvider.get().dependsOn(collectTask)
-        // Ensure NDK build waits for bootstraps
         variant.externalNativeBuildProviders.each { provider ->
             provider.configure { t ->
                 t.dependsOn(collectTask)
