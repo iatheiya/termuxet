@@ -43,14 +43,12 @@ android {
                     abiFilters ciArchVal
                 }
             } else {
-                // Default to all, usually acceptable, but ensure cleaner builds below
                 abiFilters "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
             }
         }
 
         externalNativeBuild {
             ndkBuild {
-                // Added -I flag with absolute path to ensure .incbin finds the bootstrap zips
                 cFlags "-std=c11", "-Wall", "-Wextra", "-Werror", "-Os", "-fno-stack-protector", "-Wl,--gc-sections", "-I${project.file('src/main/cpp').absolutePath}"
             }
         }
@@ -192,11 +190,6 @@ tasks.register("collectLocalBootstraps") {
 
         def env = System.getenv()
         def skipDownload = env['TERMUX_SKIP_BOOTSTRAP_DOWNLOAD'] == '1'
-        def overrideBase = env['TERMUX_BOOTSTRAP_URL']
-        def overrideList = env['TERMUX_BOOTSTRAP_URLS']
-
-        // Increase strictness: Minimum valid bootstrap zip size (approx 1MB)
-        // This prevents 404 HTML error pages (~1KB) from being treated as valid zips
         def MIN_ZIP_SIZE = 1024 * 1024 
 
         targetAbis.each { gradleArch ->
@@ -206,91 +199,57 @@ tasks.register("collectLocalBootstraps") {
             def zipName = "bootstrap-${termuxArch}.zip"
             def targetFile = new File(outputDir, zipName)
 
-            if (targetFile.exists()) {
-                 if (targetFile.length() > MIN_ZIP_SIZE) {
-                    println "--- Bootstrap ${zipName} already exists and size is valid, skipping."
-                    return
-                 } else {
-                    println "--- Bootstrap ${zipName} exists but is too small (${targetFile.length()} bytes). Deleting and re-downloading."
-                    targetFile.delete()
-                 }
+            if (targetFile.exists() && targetFile.length() > MIN_ZIP_SIZE) {
+                println "--- Bootstrap ${zipName} valid, skipping download."
+                return
             }
 
-            if (skipDownload) {
-                throw new GradleException("Bootstrap ${zipName} missing and TERMUX_SKIP_BOOTSTRAP_DOWNLOAD=1")
-            }
+            if (skipDownload) throw new GradleException("Bootstrap ${zipName} missing and TERMUX_SKIP_BOOTSTRAP_DOWNLOAD=1")
 
-            def urls = []
-
-            if (overrideList) {
-                overrideList.split(",").each { u ->
-                    def uu = u?.trim()
-                    if (uu) urls.add(uu.endsWith("/") ? uu + "bootstrap-${termuxArch}.zip" : uu + "/bootstrap-${termuxArch}.zip")
-                }
-            } else if (overrideBase) {
-                urls.add("${overrideBase.replaceAll(/\\/$/, '')}/bootstrap-${termuxArch}.zip")
-            } else {
-                // Priority changed: GitHub Releases first, then raw content
-                urls.add("https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/bootstrap-${termuxArch}.zip")
-                urls.add("https://ghproxy.com/https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/bootstrap-${termuxArch}.zip")
-                urls.add("https://github.com/termux/termux-app/raw/master/app/src/main/cpp/bootstrap-${termuxArch}.zip")
-            }
+            def urls = [
+                "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/${zipName}",
+                "https://raw.githubusercontent.com/termux/termux-app/master/app/src/main/cpp/${zipName}",
+                "https://cdn.jsdelivr.net/gh/termux/termux-app@master/app/src/main/cpp/${zipName}"
+            ]
 
             def downloaded = false
-            urls.each { downloadUrl ->
-                if (downloaded) return
-                println "--- Attempting to download: ${downloadUrl}"
-                def attempts = 3
-                for (int attempt = 1; attempt <= attempts; attempt++) {
-                    def partFile = new File(outputDir, zipName + ".part")
-                    if (partFile.exists()) partFile.delete()
-                    HttpURLConnection conn = null
-                    InputStream ins = null
-                    FileOutputStream fos = null
+            for (def downloadUrl in urls) {
+                if (downloaded) break
+                println "--- Trying: ${downloadUrl}"
+                
+                for (int attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        URL urlObj = new URL(downloadUrl)
-                        conn = (HttpURLConnection) urlObj.openConnection()
+                        def partFile = new File(outputDir, zipName + ".part")
+                        if (partFile.exists()) partFile.delete()
+                        
+                        URLConnection conn = new URL(downloadUrl).openConnection()
+                        conn.setConnectTimeout(60000)
+                        conn.setReadTimeout(60000)
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
                         conn.setInstanceFollowRedirects(true)
-                        conn.setConnectTimeout(15000)
-                        conn.setReadTimeout(30000)
-                        conn.setRequestProperty("User-Agent", "Gradle-Termux-Downloader")
-                        def rc = conn.getResponseCode()
-                        if (rc >= 200 && rc < 300) {
-                            ins = conn.getInputStream()
-                            fos = new FileOutputStream(partFile)
-                            byte[] buf = new byte[8192]
-                            int len
-                            while ((len = ins.read(buf)) != -1) {
-                                fos.write(buf, 0, len)
-                            }
-                            fos.close()
-                            ins.close()
-                            
-                            if (partFile.length() > MIN_ZIP_SIZE) {
-                                partFile.renameTo(targetFile)
-                                println "--- Downloaded ${zipName} -> ${targetFile}"
-                                downloaded = true
-                                break
-                            } else {
-                                println "--- Downloaded file too small (${partFile.length()} bytes). Likely an error page."
-                                if (partFile.exists()) partFile.delete()
-                            }
+
+                        conn.getInputStream().withStream { is ->
+                            partFile.withOutputStream { os -> os << is }
+                        }
+
+                        if (partFile.length() > MIN_ZIP_SIZE) {
+                            partFile.renameTo(targetFile)
+                            println "--- Success: ${zipName}"
+                            downloaded = true
+                            break
+                        } else {
+                            println "--- File too small (${partFile.length()} bytes). Likely an error page."
+                            partFile.delete()
                         }
                     } catch (Exception e) {
-                        println "--- Download failed for ${downloadUrl}: ${e.message}"
-                    } finally {
-                        try { if (ins != null) ins.close() } catch (Exception ignore) {}
-                        try { if (fos != null) fos.close() } catch (Exception ignore) {}
-                        try { if (conn != null) conn.disconnect() } catch (Exception ignore) {}
-                    }
-                    if (!downloaded && attempt < attempts) {
-                        Thread.sleep(2000)
+                        println "--- Attempt ${attempt} failed: ${e.message}"
+                        if (attempt < 3) Thread.sleep(5000)
                     }
                 }
             }
 
             if (!downloaded) {
-                 throw new GradleException("Could not download valid bootstrap for ${termuxArch}. Files were either missing or too small (corruption/error page). Check connection.")
+                throw new GradleException("CRITICAL: Failed to download ${zipName} from all sources.")
             }
         }
     }
