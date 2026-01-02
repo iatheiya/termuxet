@@ -168,90 +168,61 @@ tasks.named("clean") {
     }
 }
 
-tasks.register("downloadBootstraps") {
-    outputs.dir("$buildDir/bootstrap")
+tasks.register("collectLocalBootstraps") {
     doLast {
-        def bootstrapVersion = "2024.03.04-r1%2Bapt-android-7"
-        def baseUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${bootstrapVersion}"
-        def outDir = file("$buildDir/bootstrap")
-        if (!outDir.exists()) {
-            if (!outDir.mkdirs()) {
-                throw new GradleException("Failed to create build bootstrap dir: ${outDir.absolutePath}")
-            }
-        }
         def archMap = [
             'arm64-v8a': 'aarch64',
             'armeabi-v7a': 'arm',
             'x86': 'i686',
             'x86_64': 'x86_64'
         ]
-        def possibleDirs = [
-            new File(project.projectDir, "bootstrap-out"),
-            new File(project.projectDir, "build/bootstrap"),
-            new File(project.projectDir, "../termux-packages/out")
-        ]
+
+        def outputDir = file("${projectDir}/src/main/cpp")
+        if (!outputDir.exists()) outputDir.mkdirs()
+
         def targetAbis = android.defaultConfig.ndk.abiFilters
         if (targetAbis == null || targetAbis.isEmpty()) {
             targetAbis = archMap.keySet()
         }
+
         targetAbis.each { gradleArch ->
-            if (!archMap.containsKey(gradleArch)) return
             def termuxArch = archMap[gradleArch]
+            if (!termuxArch) return
+
             def zipName = "bootstrap-${termuxArch}.zip"
-            def outFile = new File(outDir, zipName)
-            if (outFile.exists() && outFile.length() > 0) {
-                println "Bootstrap cached: ${outFile.absolutePath}"
+            def targetFile = new File(outputDir, zipName)
+
+            if (targetFile.exists() && targetFile.length() > 1024) {
+                println "--- Bootstrap ${zipName} already exists, skipping."
                 return
             }
-            boolean foundLocal = false
-            for (dir in possibleDirs) {
-                def candidate = new File(dir, zipName)
-                if (candidate.exists() && candidate.length() > 0) {
-                    project.copy {
-                        from candidate
-                        into outDir
-                    }
-                    foundLocal = true
-                    println "Copied local bootstrap from ${candidate.absolutePath}"
-                    break
-                }
-            }
-            if (!foundLocal) {
-                def downloadUrl = "${baseUrl}/${zipName}"
+
+            def downloadUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/bootstrap-${termuxArch}.zip"
+
+            println "--- Downloading: ${downloadUrl}"
+            try {
+                ant.get(src: downloadUrl, dest: targetFile, verbose: true)
+            } catch (Exception e) {
+                println "--- Primary URL failed, trying backup..."
+                def backupUrl = "https://github.com/termux/termux-app/raw/master/app/src/main/cpp/bootstrap-${termuxArch}.zip"
                 try {
-                    ant.get(src: downloadUrl, dest: outFile, verbose: true, skipexisting: true)
-                    if (!outFile.exists() || outFile.length() == 0) {
-                        throw new GradleException("Download produced empty file for ${zipName}")
-                    }
-                    println "Downloaded ${zipName} to ${outFile.absolutePath}"
-                } catch (Exception e) {
-                    if (outFile.exists()) outFile.delete()
-                    throw new GradleException("Failed to obtain bootstrap ${zipName}: ${e.message}", e)
+                    ant.get(src: backupUrl, dest: targetFile, verbose: true)
+                } catch (Exception e2) {
+                    throw new GradleException("Could not download bootstrap for ${termuxArch}. Please check internet connection.")
                 }
             }
         }
-    }
-}
-
-tasks.register("stageBootstraps", Copy) {
-    dependsOn tasks.named("downloadBootstraps")
-    from("$buildDir/bootstrap")
-    into("$projectDir/src/main/cpp")
-    include "bootstrap-*.zip"
-    doFirst {
-        def dest = file("$projectDir/src/main/cpp")
-        if (!dest.exists()) dest.mkdirs()
     }
 }
 
 afterEvaluate {
     android.applicationVariants.configureEach { variant ->
-        def stageTask = tasks.named("stageBootstraps")
-        variant.preBuildProvider.get().dependsOn(stageTask)
-        variant.javaCompileProvider.get().dependsOn(stageTask)
+        def collectTask = tasks.named("collectLocalBootstraps")
+        variant.preBuildProvider.get().dependsOn(collectTask)
+        variant.javaCompileProvider.get().dependsOn(collectTask)
         variant.externalNativeBuildProviders.each { provider ->
             provider.configure { t ->
-                t.dependsOn(stageTask)
+                t.dependsOn(collectTask)
             }
         }
     }
