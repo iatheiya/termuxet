@@ -1,5 +1,6 @@
 import java.net.URL
 import java.net.URLConnection
+import groovy.json.JsonSlurper
 
 apply plugin: 'com.android.application'
 
@@ -197,6 +198,20 @@ tasks.register("collectLocalBootstraps") {
         def skipDownload = env['TERMUX_SKIP_BOOTSTRAP_DOWNLOAD'] == '1'
         def MIN_ZIP_SIZE = 1024 * 1024 
 
+        def latestTag = "bootstrap-2025.12.28-r1+apt.android-7"
+        try {
+            def apiInfo = new URL("https://api.github.com/repos/termux/termux-packages/releases").openConnection()
+            apiInfo.setConnectTimeout(10000)
+            apiInfo.setReadTimeout(10000)
+            apiInfo.setRequestProperty("User-Agent", "Termux-Build-Script")
+            def json = new JsonSlurper().parseText(apiInfo.getInputStream().getText())
+            def latest = json.find { it.tag_name && it.tag_name.startsWith("bootstrap-") && it.tag_name.contains("apt.android-7") }
+            if (latest) latestTag = latest.tag_name
+        } catch (Exception e) {
+        }
+
+        def encodedTag = latestTag.replace("+", "%2B")
+
         targetAbis.each { gradleArch ->
             def termuxArch = archMap[gradleArch]
             if (!termuxArch) return
@@ -205,76 +220,57 @@ tasks.register("collectLocalBootstraps") {
             def targetFile = new File(outputDir, zipName)
 
             if (targetFile.exists() && targetFile.length() > MIN_ZIP_SIZE) {
-                println "--- Bootstrap ${zipName} valid, skipping download."
                 return
             }
 
-            if (skipDownload) throw new GradleException("Bootstrap ${zipName} missing and TERMUX_SKIP_BOOTSTRAP_DOWNLOAD=1")
+            if (skipDownload) throw new GradleException("Bootstrap missing")
 
-            // Обновленные ссылки на 2024 год + зеркало
-            def urls = [
-                "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.20-r1+apt-android-7/${zipName}",
-                "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/${zipName}" 
-            ]
+            def downloadUrl = "https://github.com/termux/termux-packages/releases/download/${encodedTag}/${zipName}"
 
             def downloaded = false
-            for (def downloadUrl in urls) {
-                if (downloaded) break
-                println "--- Trying: ${downloadUrl}"
-                
-                // 1. Попытка через CURL (Исправлено: используется project.exec)
-                try {
-                    println "--- Attempting download via system CURL..."
-                    project.exec {
-                        commandLine 'curl', '-L', '--fail', '--retry', '3', '--connect-timeout', '60', '-o', targetFile.absolutePath, downloadUrl
-                        ignoreExitValue = true
-                    }
-                    if (targetFile.exists() && targetFile.length() > MIN_ZIP_SIZE) {
-                        println "--- Success (via curl): ${zipName}"
-                        downloaded = true
-                        break
-                    }
-                } catch (Exception e) {
-                    println "--- Curl attempt failed or not available: ${e.message}"
+            
+            try {
+                project.exec {
+                    commandLine 'curl', '-L', '--fail', '--retry', '3', '--connect-timeout', '60', '-o', targetFile.absolutePath, downloadUrl
+                    ignoreExitValue = true
                 }
+                if (targetFile.exists() && targetFile.length() > MIN_ZIP_SIZE) {
+                    downloaded = true
+                }
+            } catch (Exception e) {
+            }
 
-                // 2. Fallback на Java, если CURL не сработал
-                if (!downloaded) {
-                    println "--- Attempting download via Java..."
-                    for (int attempt = 1; attempt <= 3; attempt++) {
-                        try {
-                            def partFile = new File(outputDir, zipName + ".part")
-                            if (partFile.exists()) partFile.delete()
-                            
-                            URLConnection conn = new URL(downloadUrl).openConnection()
-                            conn.setConnectTimeout(60000)
-                            conn.setReadTimeout(60000)
-                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                            conn.setInstanceFollowRedirects(true)
+            if (!downloaded) {
+                for (int attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        def partFile = new File(outputDir, zipName + ".part")
+                        if (partFile.exists()) partFile.delete()
+                        
+                        URLConnection conn = new URL(downloadUrl).openConnection()
+                        conn.setConnectTimeout(60000)
+                        conn.setReadTimeout(60000)
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                        conn.setInstanceFollowRedirects(true)
 
-                            conn.getInputStream().withStream { is ->
-                                partFile.withOutputStream { os -> os << is }
-                            }
-
-                            if (partFile.length() > MIN_ZIP_SIZE) {
-                                partFile.renameTo(targetFile)
-                                println "--- Success (via Java): ${zipName}"
-                                downloaded = true
-                                break
-                            } else {
-                                println "--- File too small (${partFile.length()} bytes). Likely an error page."
-                                partFile.delete()
-                            }
-                        } catch (Exception e) {
-                            println "--- Java attempt ${attempt} failed: ${e.message}"
-                            if (attempt < 3) Thread.sleep(5000)
+                        conn.getInputStream().withStream { is ->
+                            partFile.withOutputStream { os -> os << is }
                         }
+
+                        if (partFile.length() > MIN_ZIP_SIZE) {
+                            partFile.renameTo(targetFile)
+                            downloaded = true
+                            break
+                        } else {
+                            partFile.delete()
+                        }
+                    } catch (Exception e) {
+                        if (attempt < 3) Thread.sleep(5000)
                     }
                 }
             }
 
             if (!downloaded) {
-                throw new GradleException("CRITICAL: Failed to download ${zipName} from all sources.")
+                throw new GradleException("Failed to download ${zipName}")
             }
         }
     }
