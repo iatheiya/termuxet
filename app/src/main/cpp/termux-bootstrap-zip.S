@@ -1,4 +1,4 @@
-    .global blob
+.global blob
     .global blob_size
     .section .rodata
 blob:
@@ -11,7 +11,7 @@ blob:
 #elif defined(__arm__) || defined(arm)
     .incbin "bootstrap-arm.zip"
 #else
-# error Unsupported arch
+#error Unsupported arch
 #endif
 1:
 blob_size:
