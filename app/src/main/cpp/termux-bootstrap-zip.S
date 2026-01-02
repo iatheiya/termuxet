@@ -26,3 +26,5 @@ blob:
 blob_size:
     .int 1b - blob
 .size blob_size, 4
+
+.section .note.GNU-stack,"",%progbits
