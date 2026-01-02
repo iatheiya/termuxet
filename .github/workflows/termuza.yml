@@ -1,14 +1,13 @@
 name: termuza
-
 on:
   push:
     branches: [master, main]
   pull_request:
     branches: [master, main]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 env:
-  TERMUX_SKIP_BOOTSTRAP_DOWNLOAD: '0'
+  TERMUX_SKIP_BOOTSTRAP_DOWNLOAD: '1'
   JAVA_VERSION: '17'
   API_LEVEL: '30'
   ANDROID_TARGET: 'google_apis'
@@ -27,18 +26,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-
       - run: chmod +x ./gradlew
-
       - name: prepare-emulator-logs
         run: |
           rm -rf emulator_logs && mkdir -p emulator_logs
-
       - name: collect-system-info
         run: |
           mkdir -p diagnostics_out
@@ -47,7 +42,6 @@ jobs:
           cat /proc/cpuinfo > diagnostics_out/cpuinfo.txt 2>/dev/null || true
           lsmod | grep kvm > diagnostics_out/kvm_modules.txt 2>/dev/null || true
           java -version > diagnostics_out/java_version.txt 2>&1 || true
-
       - name: unit-tests-debug
         continue-on-error: true
         run: |
@@ -55,7 +49,6 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="diagnostics_out/diagnostics-${RUNID}-unit-debug.txt"
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee "$OUT" || true
-
       - name: lint-check
         continue-on-error: true
         run: |
@@ -63,7 +56,6 @@ jobs:
           RUNID=${{ github.run_id }}
           OUT="diagnostics_out/diagnostics-${RUNID}-lint.txt"
           ./gradlew lint --stacktrace 2>&1 | tee "$OUT" || true
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -81,17 +73,14 @@ jobs:
       apk_exists: ${{ steps.check_apks.outputs.apk_exists }}
     steps:
       - uses: actions/checkout@v4
-
       - name: ensure-workspace-writable
         run: |
           sudo chown -R $(id -u):$(id -g) "$GITHUB_WORKSPACE" || true
           chmod -R u+w "$GITHUB_WORKSPACE" || true
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-
       - name: cache-gradle
         uses: actions/cache@v4
         with:
@@ -101,13 +90,10 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*','**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-
       - run: chmod +x ./gradlew
-
       - name: prepare-keystore
         run: |
           mkdir -p build_out/apk
@@ -116,24 +102,25 @@ jobs:
           else
             keytool -genkeypair -v -keystore release.keystore -alias ci_release -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CI,OU=CI,O=CI,L=CI,ST=CI,C=US"
           fi
-
+      - name: download-bootstraps
+        run: |
+          mkdir -p app/src/main/cpp
+          curl -L --fail --retry 5 --retry-delay 5 -o app/src/main/cpp/bootstrap-x86_64.zip "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/bootstrap-x86_64.zip"
+          curl -L --fail --retry 5 --retry-delay 5 -o app/src/main/cpp/bootstrap-aarch64.zip "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/bootstrap-aarch64.zip"
       - name: assemble-emulator-apk
         continue-on-error: true
         run: |
           ./gradlew clean assembleDebug -PciArch=x86_64 --stacktrace
           find app/build/outputs/apk -name "*.apk" -exec cp {} build_out/apk/termux-debug-x86_64.apk \; || true
-
       - name: assemble-device-apk
         continue-on-error: true
         run: |
           ./gradlew clean assembleDebug -PciArch=arm64-v8a --stacktrace -x test -x lint
           find app/build/outputs/apk -name "*.apk" -exec cp {} build_out/apk/termux-debug-arm64-v8a.apk \; || true
-
       - name: dependency-check
         continue-on-error: true
         run: |
           ./gradlew dependencies > build_out/dependency_tree.txt || true
-
       - name: check-collected-apks
         id: check_apks
         run: |
@@ -144,7 +131,6 @@ jobs:
              echo "apk_exists=false" >> $GITHUB_ENV
              echo "apk_exists=false" >> $GITHUB_OUTPUT
           fi
-
       - name: analyze-artifacts
         run: |
           mkdir -p build_out
@@ -165,7 +151,6 @@ jobs:
           else
             echo "MANIFEST_NOT_FOUND" > build_out/manifest_analysis.txt
           fi
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -181,26 +166,21 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: 11076708
-
       - uses: actions/download-artifact@v4
         with:
           name: diagnostics-data
           path: diagnostics_out
-
       - uses: actions/download-artifact@v4
         with:
           name: build-data
           path: downloaded_build
-
       - name: locate-apk
         id: locate_apk
         run: |
@@ -235,12 +215,10 @@ jobs:
             echo "EMULATOR_APK_NOT_FOUND" > emulator_logs/apk_missing.txt
             exit 1
           fi
-
       - name: ensure-emulator-logs
         run: |
           rm -rf emulator_logs && mkdir -p emulator_logs
         if: always()
-
       - name: enable-kvm
         if: ${{ env.apk_exists == 'true' }}
         run: |
@@ -251,7 +229,6 @@ jobs:
           else
             echo "kvm_enabled=false" >> $GITHUB_ENV
           fi
-
       - name: install-build-tools
         if: ${{ env.apk_exists == 'true' }}
         run: |
@@ -266,12 +243,10 @@ jobs:
           echo "${ANDROID_HOME}/emulator" >> $GITHUB_PATH
           echo "${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> $GITHUB_PATH
           yes | sdkmanager --install "platform-tools" "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" "platforms;android-${API_LEVEL}" || true
-
       - name: make emulator script executable
         if: ${{ env.apk_exists == 'true' }}
         run: |
           chmod +x ./ci/emulator_run.sh || true
-
       - name: run-emulator-and-install
         if: ${{ env.apk_exists == 'true' }}
         uses: reactivecircus/android-emulator-runner@v2
@@ -293,7 +268,6 @@ jobs:
             -accel on
           emulator-boot-timeout: ${{ env.EMU_BOOT_TIMEOUT_SEC }}
           script: ./ci/emulator_run.sh
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -308,12 +282,10 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           path: artifacts
-
       - name: generate-strict-report
         run: |
           OUT="FULL_STRICT_REPORT.txt"
@@ -357,7 +329,6 @@ jobs:
           find artifacts -type f -name "logcat.txt" -exec tail -n 200 {} + >> "$OUT" || true
           echo "[SECTION: MEMORY USAGE]" >> "$OUT"
           find artifacts -type f -name "memory_monitor.txt" -exec tail -n 10 {} + >> "$OUT" || true
-
       - uses: actions/upload-artifact@v4
         with:
           name: FINAL_REPORT
