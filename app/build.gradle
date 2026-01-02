@@ -25,7 +25,7 @@ android {
         minSdk 24
         targetSdk 35
         versionCode 118
-        versionName appVersionName && appVersionName.trim() ? appVersionName : "0.118.0"
+        versionName ((appVersionName && appVersionName.trim()) ? appVersionName : "0.118.0")
         buildConfigField "String", "TERMUX_PACKAGE_VARIANT", "\"${variantVal}\""
         
         manifestPlaceholders = [
@@ -211,10 +211,10 @@ tasks.register("collectLocalBootstraps") {
 
             if (skipDownload) throw new GradleException("Bootstrap ${zipName} missing and TERMUX_SKIP_BOOTSTRAP_DOWNLOAD=1")
 
+            // Обновленные ссылки на 2024 год + зеркало
             def urls = [
-                "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/${zipName}",
-                "https://raw.githubusercontent.com/termux/termux-app/master/app/src/main/cpp/${zipName}",
-                "https://cdn.jsdelivr.net/gh/termux/termux-app@master/app/src/main/cpp/${zipName}"
+                "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.20-r1+apt-android-7/${zipName}",
+                "https://github.com/termux/termux-packages/releases/download/bootstrap-2022.02.11-r1/${zipName}" 
             ]
 
             def downloaded = false
@@ -222,12 +222,12 @@ tasks.register("collectLocalBootstraps") {
                 if (downloaded) break
                 println "--- Trying: ${downloadUrl}"
                 
-                // 1. Попытка через CURL
+                // 1. Попытка через CURL (Исправлено: используется project.exec)
                 try {
                     println "--- Attempting download via system CURL..."
-                    exec {
+                    project.exec {
                         commandLine 'curl', '-L', '--fail', '--retry', '3', '--connect-timeout', '60', '-o', targetFile.absolutePath, downloadUrl
-                        ignoreExitValue true
+                        ignoreExitValue = true
                     }
                     if (targetFile.exists() && targetFile.length() > MIN_ZIP_SIZE) {
                         println "--- Success (via curl): ${zipName}"
