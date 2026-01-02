@@ -205,7 +205,18 @@ tasks.named("clean") {
     }
 }
 
+def expectedBootstrapFiles = [
+    file("$projectDir/src/main/cpp/bootstrap-aarch64.zip"),
+    file("$projectDir/src/main/cpp/bootstrap-arm.zip"),
+    file("$projectDir/src/main/cpp/bootstrap-i686.zip"),
+    file("$projectDir/src/main/cpp/bootstrap-x86_64.zip")
+]
+
 def downloadBootstrapsProvider = tasks.register("downloadBootstraps") {
+    outputs.files expectedBootstrapFiles
+    doFirst {
+        println "Ensuring bootstrap zip files are present"
+    }
     doLast {
         def packageVariant = (System.getenv("TERMUX_PACKAGE_VARIANT") ?: "apt-android-7") ?: "apt-android-7"
         if (packageVariant == "apt-android-7") {
@@ -228,6 +239,7 @@ def bootstrapTaskProvider = downloadBootstrapsProvider
 
 tasks.withType(com.android.build.gradle.tasks.ExternalNativeBuildTask).configureEach {
     dependsOn bootstrapTaskProvider
+    inputs.files expectedBootstrapFiles
 }
 
 tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
