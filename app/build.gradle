@@ -143,7 +143,9 @@ def validateVersionName(String versionName) {
 }
 
 def downloadBootstrap(String arch, String expectedChecksum, String version) {
-    def digest = java.security.MessageDigest.getInstance("SHA-256")
+    def maxAttempts = 5
+    def sleepMs = 2500
+    System.setProperty("https.protocols", "TLSv1.2,TLSv1.3")
     def relativePath = "src/main/cpp/bootstrap-${arch}.zip"
     def file = new File(project.projectDir, relativePath)
     def tmp = new File(project.projectDir, relativePath + ".tmp")
@@ -154,46 +156,63 @@ def downloadBootstrap(String arch, String expectedChecksum, String version) {
         }
     }
     if (file.exists() && file.length() > 0) {
+        def digestCheck = java.security.MessageDigest.getInstance("SHA-256")
         file.withInputStream { is ->
             def buffer = new byte[8192]
             int readBytes
             while ((readBytes = is.read(buffer)) != -1) {
-                digest.update(buffer, 0, readBytes)
+                digestCheck.update(buffer, 0, readBytes)
             }
         }
-        def checksumExisting = String.format("%064x", new BigInteger(1, digest.digest()))
+        def checksumExisting = String.format("%064x", new BigInteger(1, digestCheck.digest()))
         if (checksumExisting == expectedChecksum) {
             return
         } else {
             file.delete()
-            digest.reset()
         }
     }
     def remoteUrl = "https://github.com/termux/termux-packages/releases/download/bootstrap-${version}/bootstrap-${arch}.zip"
-    try {
-        if (tmp.exists()) tmp.delete()
-        ant.get(src: remoteUrl, dest: tmp.absolutePath)
-        tmp.withInputStream { is ->
-            def buffer = new byte[8192]
-            int readBytes
-            while ((readBytes = is.read(buffer)) != -1) {
-                digest.update(buffer, 0, readBytes)
+    def lastException = null
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            if (tmp.exists()) tmp.delete()
+            ant.get(src: remoteUrl, dest: tmp.absolutePath)
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            tmp.withInputStream { is ->
+                def buffer = new byte[8192]
+                int readBytes
+                while ((readBytes = is.read(buffer)) != -1) {
+                    digest.update(buffer, 0, readBytes)
+                }
+            }
+            def checksum = String.format("%064x", new BigInteger(1, digest.digest()))
+            if (checksum != expectedChecksum) {
+                if (tmp.exists()) tmp.delete()
+                throw new GradleException("Wrong checksum for " + remoteUrl)
+            }
+            if (file.exists()) file.delete()
+            def moved = tmp.renameTo(file)
+            if (!moved) {
+                file.bytes = tmp.bytes
+                tmp.delete()
+            }
+            return
+        } catch (Exception e) {
+            lastException = e
+            if (tmp.exists()) tmp.delete()
+            if (attempt == maxAttempts) {
+                throw new GradleException("Error downloading ${remoteUrl}: " + e.getMessage(), e)
+            } else {
+                try {
+                    Thread.sleep(sleepMs)
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt()
+                }
             }
         }
-        def checksum = String.format("%064x", new BigInteger(1, digest.digest()))
-        if (checksum != expectedChecksum) {
-            if (tmp.exists()) tmp.delete()
-            throw new GradleException("Wrong checksum for " + remoteUrl)
-        }
-        if (file.exists()) file.delete()
-        def moved = tmp.renameTo(file)
-        if (!moved) {
-            file.bytes = tmp.bytes
-            tmp.delete()
-        }
-    } catch (Exception e) {
-        if (tmp.exists()) tmp.delete()
-        throw new GradleException("Error downloading ${remoteUrl}: " + e.getMessage(), e)
+    }
+    if (lastException != null) {
+        throw new GradleException("Error downloading ${remoteUrl}: " + lastException.getMessage(), lastException)
     }
 }
 
