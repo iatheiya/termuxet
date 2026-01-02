@@ -81,6 +81,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: ensure-workspace-writable
+        run: |
+          sudo chown -R $(id -u):$(id -g) "$GITHUB_WORKSPACE" || true
+          chmod -R u+w "$GITHUB_WORKSPACE" || true
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -239,12 +244,10 @@ jobs:
         if: ${{ env.apk_exists == 'true' }}
         run: |
           if [ -e /dev/kvm ]; then
-            echo "KVM device found, fixing permissions..."
             sudo chmod 666 /dev/kvm || true
             ls -l /dev/kvm || true
             echo "kvm_enabled=true" >> $GITHUB_ENV
           else
-            echo "KVM device NOT found. Expect slow performance."
             echo "kvm_enabled=false" >> $GITHUB_ENV
           fi
 
