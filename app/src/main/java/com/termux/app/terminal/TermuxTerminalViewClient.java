@@ -1,4 +1,3 @@
-
 package com.termux.app.terminal;
 
 import android.annotation.SuppressLint;
@@ -365,7 +364,7 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
                     break;
                 case 'q':
                 case 'k':
-                    mActivity.toggleTerminalToolbar();
+                    mActivity.getUIManager().toggleTerminalToolbar();
                     mVirtualFnKeyDown=false; 
                     break;
             }
