@@ -301,16 +301,16 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         executionCommand.shellCreateMode = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_SHELL_CREATE_MODE, null);
         executionCommand.commandLabel = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "Execution Intent Command");
         executionCommand.commandDescription = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_COMMAND_DESCRIPTION, null);
-        executionCommand.commandHelp = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_COMMAND_HELP, null);
-        executionCommand.pluginAPIHelp = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_PLUGIN_API_HELP, null);
+        executionCommand.commandHelp = IntentUtils.getStringIfSet(intent, TERMUX_SERVICE.EXTRA_COMMAND_HELP, null);
+        executionCommand.pluginAPIHelp = IntentUtils.getStringIfSet(intent, TERMUX_SERVICE.EXTRA_PLUGIN_API_HELP, null);
         executionCommand.resultConfig.resultPendingIntent = intent.getParcelableExtra(TERMUX_SERVICE.EXTRA_PENDING_INTENT);
-        executionCommand.resultConfig.resultDirectoryPath = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_DIRECTORY, null);
+        executionCommand.resultConfig.resultDirectoryPath = IntentUtils.getStringIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_DIRECTORY, null);
         if (executionCommand.resultConfig.resultDirectoryPath != null) {
             executionCommand.resultConfig.resultSingleFile = intent.getBooleanExtra(TERMUX_SERVICE.EXTRA_RESULT_SINGLE_FILE, false);
-            executionCommand.resultConfig.resultFileBasename = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_BASENAME, null);
-            executionCommand.resultConfig.resultFileOutputFormat = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_OUTPUT_FORMAT, null);
-            executionCommand.resultConfig.resultFileErrorFormat = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_ERROR_FORMAT, null);
-            executionCommand.resultConfig.resultFilesSuffix = IntentUtils.getStringExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILES_SUFFIX, null);
+            executionCommand.resultConfig.resultFileBasename = IntentUtils.getStringIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_BASENAME, null);
+            executionCommand.resultConfig.resultFileOutputFormat = IntentUtils.getStringArrayExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_OUTPUT_FORMAT, null);
+            executionCommand.resultConfig.resultFileErrorFormat = IntentUtils.getStringArrayExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILE_ERROR_FORMAT, null);
+            executionCommand.resultConfig.resultFilesSuffix = IntentUtils.getStringArrayExtraIfSet(intent, TERMUX_SERVICE.EXTRA_RESULT_FILES_SUFFIX, null);
         }
 
         if (executionCommand.shellCreateMode == null)
@@ -340,7 +340,7 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         AppShell newTermuxTask = null;
         ShellCreateMode shellCreateMode = processShellCreateMode(executionCommand);
         if (shellCreateMode == null) return;
-        if (ShellCreateMode.NO_SHELL_WITH_NAME.equalsShellCreateMode(shellCreateMode)) {
+        if (ShellCreateMode.NO_SHELL_WITH_NAME == shellCreateMode) {
             newTermuxTask = getTermuxTaskForShellName(executionCommand.shellName);
             if (newTermuxTask != null)
                 Logger.logVerbose(LOG_TAG, "Existing TermuxTask with \"" + executionCommand.shellName + "\" shell name found for shell create mode \"" + shellCreateMode.getMode() + "\"");
@@ -426,7 +426,7 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         TermuxSession newTermuxSession = null;
         ShellCreateMode shellCreateMode = processShellCreateMode(executionCommand);
         if (shellCreateMode == null) return;
-        if (ShellCreateMode.NO_SHELL_WITH_NAME.equalsShellCreateMode(shellCreateMode)) {
+        if (ShellCreateMode.NO_SHELL_WITH_NAME == shellCreateMode) {
             newTermuxSession = getTermuxSessionForShellName(executionCommand.shellName);
             if (newTermuxSession != null)
                 Logger.logVerbose(LOG_TAG, "Existing TermuxSession with \"" + executionCommand.shellName + "\" shell name found for shell create mode \"" + shellCreateMode.getMode() + "\"");
