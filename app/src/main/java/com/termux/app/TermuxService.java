@@ -57,7 +57,7 @@ public final class TermuxService extends Service implements AppShell.AppShellCli
         System.loadLibrary("termux_loader");
     }
 
-    private native int nativeStartSession();
+    private native int nativeStartSession(String executablePath, String[] arguments, String[] environment);
 
     @Override
     public void onCreate() {
